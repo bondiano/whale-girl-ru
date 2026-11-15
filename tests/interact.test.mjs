@@ -11,14 +11,14 @@ test('applyAction: feed 返回 200 + 回话，状态不变', () => {
   const r = applyAction(base, 'feed')
   assert.equal(r.status, 200)
   assert.equal(r.body.pet, base)
-  assert.match(r.body.reply, /「/)
+  assert.match(r.body.reply, /«/)
 })
 
 test('applyAction: play 返回 200 + 回话，状态不变', () => {
   const r = applyAction(base, 'play')
   assert.equal(r.status, 200)
   assert.equal(r.body.pet, base)
-  assert.match(r.body.reply, /「/)
+  assert.match(r.body.reply, /«/)
 })
 
 test('applyAction: 未知动作返回 400 且不产生新状态', () => {
@@ -53,8 +53,8 @@ test('applyAction: 配置回话池生效（自定义文案被使用）', () => {
 })
 
 test('applyAction: 空/缺配置回话池回退内置（配置损坏不崩互动）', () => {
-  assert.match(applyAction(base, 'feed', null).body.reply, /「/)
-  assert.match(applyAction(base, 'play', undefined).body.reply, /「/)
-  assert.match(applyAction(base, 'feed', { feed: [], play: [] }).body.reply, /「/)
-  assert.match(applyAction(base, 'play', { feed: ['x'], play: [] }).body.reply, /「/)
+  assert.match(applyAction(base, 'feed', null).body.reply, /«/)
+  assert.match(applyAction(base, 'play', undefined).body.reply, /«/)
+  assert.match(applyAction(base, 'feed', { feed: [], play: [] }).body.reply, /«/)
+  assert.match(applyAction(base, 'play', { feed: ['x'], play: [] }).body.reply, /«/)
 })

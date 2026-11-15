@@ -1,8 +1,8 @@
 {
   "name": "whale-girl",
-  "version": "0.2.4",
+  "version": "0.2.4-ru.1",
   "type": "module",
-  "description": "DSH Web GUI 内的桌面宠物（QQ 宠物形态）",
+  "description": "Домашний питомец в web-интерфейсе DSH (в духе QQ-питомца): живёт в правом нижнем углу, его можно тянуть, кормить и играть с ним; задачи, сессии и совместное время копятся в стаж, звания и воспоминания.",
   "main": "lib/index.mjs",
   "icon": "./icon.png",
   "files": [
@@ -13,14 +13,18 @@
     "lib/assets/characters",
     "lib/assets/manifest.json",
     "cordis.patch.yml",
+    "locale/*.json",
     "icon.png",
+    "README.md",
+    "README.en.md",
     "README.zh.md"
   ],
   "exports": {
     ".": "./lib/index.mjs",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "dsh": {
     "bundle": {
@@ -46,6 +50,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vlln/whale-girl.git"
+    "url": "git+https://github.com/bondiano/whale-girl-ru.git"
   }
 }

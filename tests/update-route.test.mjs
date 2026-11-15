@@ -205,7 +205,7 @@ test('本地路径安装：跟包声明的仓库的默认分支，更新一步�
   const urls = []
   globalThis.fetch = async (url) => {
     urls.push(String(url))
-    if (String(url).endsWith('/repos/vlln/whale-girl')) return { ok: true, json: async () => ({ default_branch: 'main' }) }
+    if (String(url).endsWith('/repos/bondiano/whale-girl-ru')) return { ok: true, json: async () => ({ default_branch: 'main' }) }
     return { ok: true, json: async () => ({ sha: upstreamSha, commit: { committer: {} } }) }
   }
   try {
@@ -219,7 +219,7 @@ test('本地路径安装：跟包声明的仓库的默认分支，更新一步�
 
     const post = JSON.parse((await call('POST', { 'sec-fetch-site': 'same-origin' })).body)
     assert.equal(post.state, 'restart-required')
-    assert.deepEqual(installs.map((entry) => entry.spec), ['github:vlln/whale-girl#main'], '一步：直接换成跟上游那条线')
+    assert.deepEqual(installs.map((entry) => entry.spec), ['github:bondiano/whale-girl-ru#main'], '一步：直接换成跟上游那条线')
   } finally {
     globalThis.fetch = realFetch
   }

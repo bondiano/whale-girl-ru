@@ -43,7 +43,7 @@ test('recordTaskCompleted：+XP、记统计、写回忆、不可变', () => {
   assert.equal(state.stats.tasksDone, 1)
   assert.equal(state.xp, TASK_XP)
   assert.equal(state.level, 1)
-  assert.match(state.memory[0], /完成任务「任务甲」（第 1 个）/)
+  assert.match(state.memory[0], /Задача «任务甲» выполнена \(№1\)/)
   assert.equal(base.stats.tasksDone, 0) // 不可变
   assert.equal(state.updatedAt, NOW)
 })
@@ -51,13 +51,13 @@ test('recordTaskCompleted：+XP、记统计、写回忆、不可变', () => {
 test('recordTaskCompleted：长标签截断（回忆用可读标签而非 UUID）', () => {
   const long = 'a3f9c2d1e4b5a6b7c8d9e0f1a2b3c4d5e6f7a8b9'
   const { state } = recordTaskCompleted({ ...INITIAL_STATE, updatedAt: 0 }, long, NOW)
-  assert.match(state.memory[0], /「a3f9c2d1e4b5a6…」/)
+  assert.match(state.memory[0], /«a3f9c2d1e4b5a6…»/)
   assert.ok(state.memory[0].length < 50)
 })
 
 test('任务完成解锁称号「初次协作」', () => {
   const { state, unlocked } = recordTaskCompleted({ ...INITIAL_STATE, updatedAt: 0 }, 'x', NOW)
-  assert.deepEqual(unlocked, ['初次协作'])
+  assert.deepEqual(unlocked, ['Первое сотрудничество'])
   assert.ok(state.titles.includes('first-task'))
 })
 
@@ -66,7 +66,7 @@ test('升级：XP 越过阈值时 leveledUp 且回忆含升级', () => {
   const { state, leveledUp } = recordTaskCompleted(base, 'x', NOW)
   assert.equal(leveledUp, true)
   assert.equal(state.level, 2)
-  assert.ok(state.memory.some((m) => /升到 Lv\.2/.test(m)))
+  assert.ok(state.memory.some((m) => /Новый уровень: 2/.test(m)))
 })
 
 test('recordFailure：只计数不惩罚（无 XP、不扣等级）', () => {
@@ -75,7 +75,7 @@ test('recordFailure：只计数不惩罚（无 XP、不扣等级）', () => {
   assert.equal(state.stats.failures, 1)
   assert.equal(state.xp, 100)
   assert.equal(state.level, 2)
-  assert.match(state.memory[0], /任务失败（第 1 次）/)
+  assert.match(state.memory[0], /Задача провалилась \(№1\)/)
 })
 
 test('5 次失败解锁「越挫越勇」', () => {
@@ -86,7 +86,7 @@ test('5 次失败解锁「越挫越勇」', () => {
     s = r.state
     unlocked = r.unlocked
   }
-  assert.ok(unlocked.includes('越挫越勇'))
+  assert.ok(unlocked.includes('Не сдаётся'))
 })
 
 test('recordSession：+XP、记首见时间', () => {
@@ -102,7 +102,7 @@ test('recordSessionResume：+RESUME_XP、不计会话数、不记首见（续接
   assert.equal(state.stats.sessions, 3) // 计数不变
   assert.equal(state.stats.firstSeenAt, 100) // 首见不变
   assert.equal(state.xp, RESUME_XP)
-  assert.match(state.memory[0], /回到旧会话/)
+  assert.match(state.memory[0], /Вернулись в старую сессию/)
 })
 
 test('recordActive：活跃时长积累且称号「常驻伙伴」在 6h 解锁', () => {
@@ -128,6 +128,6 @@ test('回忆环形上限 MEMORY_MAX', () => {
 })
 
 test('titleName 未知 id 原样返回', () => {
-  assert.equal(titleName('first-task'), '初次协作')
+  assert.equal(titleName('first-task'), 'Первое сотрудничество')
   assert.equal(titleName('unknown-id'), 'unknown-id')
 })

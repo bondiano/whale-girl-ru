@@ -372,7 +372,7 @@ test('memoryLine：最近 2 条完成任务 + 超出条数报总数', () => {
       { label: '重构', ok: true },
     ],
   })
-  assert.equal(line, '上次你们完成了「修复路由」、「重构」等 3 项')
+  assert.equal(line, 'В прошлый раз вы выполнили «修复路由», «重构» — всего 3')
 })
 
 test('memoryLine：失败任务不进气泡；无可展示任务 → null', () => {
@@ -383,8 +383,8 @@ test('memoryLine：失败任务不进气泡；无可展示任务 → null', () =
   assert.equal(memoryLine({ distance: 0, tasks: 'junk' }), null)
 })
 
-test('memoryLine：fork 回读（distance>0）点明分支前；长标签截 14 字', () => {
-  const line = memoryLine({ distance: 2, tasks: [{ label: '一二三四五六七八九十一二三四五', ok: true }] })
-  assert.equal(line, '上次在分支前的会话里完成了「一二三四五六七八九十一二三四…」')
-  assert.ok(!line.includes('一二三四五六七八九十一二三四五'), '完整长标签被截断')
+test('memoryLine：fork 回读（distance>0）点明分支前；长标签截 16 字', () => {
+  const line = memoryLine({ distance: 2, tasks: [{ label: '一二三四五六七八九十一二三四五六七八九', ok: true }] })
+  assert.equal(line, 'В прошлой ветке вы выполнили «一二三四五六七八九十一二三四五六…»')
+  assert.ok(!line.includes('一二三四五六七八九十一二三四五六七八九'), '完整长标签被截断')
 })
