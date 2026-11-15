@@ -61,7 +61,26 @@ test('readConfig：缺配置/坏形状安全回退 DEFAULTS', () => {
   assert.equal(readConfig({ walk: null }).walk.maxMs, DEFAULTS.walk.maxMs)
 })
 
-test('DEFAULTS.replies：内置回话池非空且为数组', () => {
-  assert.ok(Array.isArray(DEFAULTS.replies.feed) && DEFAULTS.replies.feed.length > 0)
-  assert.ok(Array.isArray(DEFAULTS.replies.play) && DEFAULTS.replies.play.length > 0)
+test('DEFAULTS.replies：内置回话池非空且为数组（含氛围/事件台词）', () => {
+  for (const key of ['feed', 'play', 'idle', 'think', 'wait', 'celebrate', 'error', 'welcome', 'levelUp']) {
+    assert.ok(Array.isArray(DEFAULTS.replies[key]) && DEFAULTS.replies[key].length > 0, `${key}: непустой пул`)
+  }
+  assert.ok(DEFAULTS.replies.idle.length >= 8, 'болтовня — не две фразы')
+})
+
+test('DEFAULTS.voice/chat：модельный голос выключен по умолчанию, беседа включена', () => {
+  assert.equal(DEFAULTS.voice.enabled, false, 'голос — opt-in')
+  assert.equal(DEFAULTS.voice.provider, 'browser')
+  assert.equal(DEFAULTS.voice.rate, 1)
+  assert.equal(DEFAULTS.chat.enabled, true)
+  assert.equal(DEFAULTS.chat.historyTurns, 8)
+})
+
+test('readConfig：voice/chat 深合并（缺键补默认，嵌套不丢）', () => {
+  const next = readConfig({ voice: { enabled: { get: () => true }, baseUrl: { get: () => 'http://localhost:8880/v1' } }, chat: { systemPrompt: { get: () => 'будь милой' } } })
+  assert.equal(next.voice.enabled, true)
+  assert.equal(next.voice.baseUrl, 'http://localhost:8880/v1')
+  assert.equal(next.voice.provider, DEFAULTS.voice.provider, 'остальные листья — из DEFAULTS')
+  assert.equal(next.chat.systemPrompt, 'будь милой')
+  assert.equal(next.chat.maxTokens, DEFAULTS.chat.maxTokens)
 })

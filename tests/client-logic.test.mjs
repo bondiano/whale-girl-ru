@@ -2,7 +2,7 @@
 // v2：零负反馈——无 hunger/mood 属性状态；情绪只由事件瞬发 + 互动喜悦。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine } from '../lib/client/logic.mjs'
+import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS } from '../lib/client/logic.mjs'
 
 const IDLE = { activity: { name: 'idle', until: 0 }, dragging: false, transient: null, sleeping: false, joyUntil: 0, now: 1000 }
 
@@ -387,4 +387,26 @@ test('memoryLine：fork 回读（distance>0）点明分支前；长标签截 16 
   const line = memoryLine({ distance: 2, tasks: [{ label: '一二三四五六七八九十一二三四五六七八九', ok: true }] })
   assert.equal(line, 'В прошлой ветке вы выполнили «一二三四五六七八九十一二三四五六…»')
   assert.ok(!line.includes('一二三四五六七八九十一二三四五六七八九'), '完整长标签被截断')
+})
+
+
+test('pickPhrase: пустой/битый пул → null, иначе фраза из пула', () => {
+  assert.equal(pickPhrase(null), null)
+  assert.equal(pickPhrase([]), null)
+  assert.equal(pickPhrase(['', '  ']), null)
+  assert.equal(pickPhrase(['a']), 'a')
+  const pool = ['a', 'b', 'c']
+  assert.equal(pickPhrase(pool, { random: () => 0 }), 'a')
+  assert.equal(pickPhrase(pool, { random: () => 0.99 }), 'c')
+})
+
+test('pickPhrase: не повторяет предыдущую фразу подряд', () => {
+  const pool = ['a', 'b']
+  assert.equal(pickPhrase(pool, { random: () => 0, avoid: 'a' }), 'b')
+  assert.equal(pickPhrase(['a'], { random: () => 0, avoid: 'a' }), 'a', 'одна фраза — повтор допустим')
+})
+
+test('nextChatterAt: интервал в диапазоне CHATTER_MIN_MS..CHATTER_MAX_MS', () => {
+  assert.equal(nextChatterAt({ now: 1000, random: () => 0 }), 1000 + CHATTER_MIN_MS)
+  assert.equal(nextChatterAt({ now: 1000, random: () => 1 }), 1000 + CHATTER_MAX_MS)
 })
