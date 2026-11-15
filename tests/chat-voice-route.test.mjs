@@ -122,6 +122,43 @@ test('POST /chat: ошибка стрима модели → 502 с резерв
   assert.ok(json(res).reply.length > 0)
 })
 
+test('POST /chat: пустой поток модели повторяется один раз', async () => {
+  let calls = 0
+  const llm = {
+    stream() {
+      calls += 1
+      const text = calls === 1 ? '' : 'Со второго раза!'
+      return (async function* gen() {
+        for (const part of text.match(/.{1,5}/gs) ?? []) yield { type: 'text-delta', index: 0, text: part }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const { call, module } = await boot({ llm })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'привет' }), { 'sec-fetch-site': 'same-origin' })
+  assert.equal(res.status, 200)
+  assert.equal(json(res).reply, 'Со второго раза!')
+  assert.equal(calls, 2)
+})
+
+test('POST /chat: два пустых потока → 502 chat-empty без повтора', async () => {
+  let calls = 0
+  const llm = {
+    stream() {
+      calls += 1
+      return (async function* gen() {
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const { call, module } = await boot({ llm })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'привет' }), { 'sec-fetch-site': 'same-origin' })
+  assert.equal(res.status, 502)
+  assert.equal(json(res).error, 'chat-empty')
+  assert.equal(json(res).failureCode, null)
+  assert.equal(calls, 2)
+})
+
 test('POST /chat: cross-origin / выключенный чат / пустой текст / большое тело', async () => {
   const { call, module } = await boot({ llm: fakeLlm() })
   assert.equal((await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'x' }), { 'sec-fetch-site': 'cross-site' })).status, 403)
