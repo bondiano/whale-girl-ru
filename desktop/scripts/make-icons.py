@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""生成桌面壳的图标资源（Windows 必需的 icons/icon.ico + Tauri 默认列表引用的标准尺寸）。
+"""Generate desktop-shell icons: the Windows-required icon.ico and standard Tauri icon sizes.
 
-契约：
-- 源是 `src-tauri/icons/icon.png`（正方形，≥256；当前 512×512）。产物一律由本脚本生成，不手改。
-- 产物：`icon.ico`（16/24/32/48/64/128/256 多尺寸）、`32x32.png`、`128x128.png`、`128x128@2x.png`。
-- ICO 编码与官方 `tauri icon` 一致：≤128 用 BMP（兼容旧工具与资源编译器），256 用 PNG（体积）。
-- `tauri.conf.json` 的 `bundle.icon` 显式声明这些产物；Windows 上 tauri-build 生成资源文件时
-  无条件要求 `icon.ico`，缺失即构建失败（见 decisions/implemented/bug-fix/2026-10-04-desktop-windows-icon-ico.md）。
+Contract:
+- Source: src-tauri/icons/icon.png, square and at least 256px (currently 512x512). Generate outputs; do not hand-edit them.
+- Outputs: icon.ico with 16/24/32/48/64/128/256 sizes, 32x32.png, 128x128.png, and 128x128@2x.png.
+- Match official tauri icon encoding: BMP at sizes up to 128 for older tools/resource compilers; PNG at 256 for compactness.
+- tauri.conf.json bundle.icon explicitly lists these outputs. Windows tauri-build requires icon.ico when generating resources;
+  its absence fails the build. See decisions/implemented/bug-fix/2026-10-04-desktop-windows-icon-ico.md.
 
-用法（在仓库根或 desktop/ 下均可）：
+Usage (from the repository root or desktop/):
     python3 desktop/scripts/make-icons.py
-依赖：Pillow（`pip install pillow`）。
+Dependency: Pillow (pip install pillow).
 """
 from pathlib import Path
 import io
@@ -19,24 +19,24 @@ import sys
 
 try:
     from PIL import Image
-except ImportError:  # pragma: no cover - 环境缺失时的可读报错
+except ImportError:  # pragma: no cover - readable diagnostic when the dependency is missing
     sys.exit("需要 Pillow：pip install pillow")
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "src-tauri" / "icons"
 SOURCE = ICON_DIR / "icon.png"
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
-PNG_ENTRY_MIN = 256  # 该尺寸及以上用 PNG 编码，其余用 BMP（与 tauri icon 一致）
+PNG_ENTRY_MIN = 256  # Use PNG encoding at this size and above; use BMP below it, matching tauri icon.
 PNG_SIZES = {"32x32.png": 32, "128x128.png": 128, "128x128@2x.png": 256}
 
 
 def _entry_blob(img: Image.Image, size: int) -> tuple[int, bytes]:
-    """把一个尺寸编码成单条目 ICO，取出其 (bpp, 载荷)。"""
+    """Encode one size as a single-entry ICO and extract its bits-per-pixel and payload."""
     bitmap_format = "png" if size >= PNG_ENTRY_MIN else "bmp"
     buf = io.BytesIO()
     img.save(buf, format="ICO", sizes=[(size, size)], bitmap_format=bitmap_format)
     data = buf.getvalue()
     bpp = struct.unpack("<H", data[12:14])[0]
-    length, offset = struct.unpack("<II", data[14:22])  # 目录项：size 在 14，imageOffset 在 18
+    length, offset = struct.unpack("<II", data[14:22])  # Directory entry: size at byte 14 and imageOffset at byte 18.
     return bpp, data[offset:offset + length]
 
 
@@ -47,7 +47,7 @@ def build_ico(src: Image.Image, sizes: list[int]) -> bytes:
     directory = b""
     payload = b""
     for size, bpp, blob in entries:
-        dim = 0 if size == 256 else size  # ICO 目录里 256 记作 0
+        dim = 0 if size == 256 else size  # ICO directory entries encode size 256 as zero.
         directory += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, bpp, len(blob), offset + len(payload))
         payload += blob
     return header + directory + payload

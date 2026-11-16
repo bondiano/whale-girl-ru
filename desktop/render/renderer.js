@@ -1,6 +1,6 @@
-// 渲染层（renderer）：Canvas 帧播放器 + 内容 bbox 点击穿透 + 气泡/角标。
-// 数据全部来自主进程 IPC（whaleGirl.*），零网络、零 CORS 面。
-// 帧播放对齐 whale-girl manifest（每状态一张横排 sheet：frames/fps/playback/motion）。
+// Canvas renderer handles frame playback, alpha-bound pointer passthrough, bubbles, and badges.
+// All data arrives through whaleGirl IPC, without network or CORS access.
+// Playback follows each manifest entry's horizontal sheet, frames, fps, playback, and motion.
 
 (() => {
   'use strict'
@@ -28,7 +28,7 @@
   let snapshot = null
   let bubbleTimer = null
 
-  // ---- 画布尺寸（跟随 manifest stageSize；配置跟随 P1-4 预留） ----
+  // Canvas dimensions follow manifest stageSize; configuration following is a separate desktop enhancement.
   const PET_BASE = 110
   function applySize() {
     const size = PET_BASE
@@ -38,14 +38,14 @@
     canvas.style.height = `${size}px`
   }
 
-  // ---- 状态配置 ----
+  // State configuration.
   function stateCfg(name) {
     return manifest?.characters?.[characterId]?.states?.[name] ?? null
   }
   function sheetKey(sheet) {
     return `${characterId}/${sheet}`
   }
-  // 安全帧数：单帧状态 frames=1 (frames>=1 恒真)；防损坏 manifest frames<=0 除零（reviewer 建议）。
+  // Require at least one frame to avoid division by zero in a damaged manifest.
   function framesOf(cfg) {
     const n = cfg?.frames
     return typeof n === 'number' && n > 0 ? Math.floor(n) : 1
@@ -67,23 +67,23 @@
     return entry
   }
 
-  // ---- 帧推进（playback 对齐 whale-girl：loop/pingpong/once/blink） ----
+  // Frame advancement follows loop/pingpong/once/blink playback modes.
   function tickFrame(now) {
     const cfg = stateCfg(animState)
     if (!cfg || !cfg.sheet) return
-    if (!(cfg.frames > 1)) return // 单帧状态由 CSS motion 表现（本端简化为静止）
+    if (!(cfg.frames > 1)) return // Single-frame states remain still in this renderer.
 
     const step = () => {
       const entry = sheetCache.get(sheetKey(cfg.sheet))
-      if (!entry) return // sheet 未就绪：跳过本帧（不裁切）
+      if (!entry) return // Skip drawing until the sheet is ready.
       const frames = framesOf(cfg)
       const frameW = Math.floor(entry.w / frames)
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.save()
       ctx.translate(canvas.width / 2, canvas.height / 2)
       ctx.scale(flip, 1)
-      // 源矩形用 sprite 自身尺寸（entry.w/entry.h），不用 canvas 尺寸——
-      // canvas 缩放/尺寸变化不会产生源越界裁切（Copilot: 源高度 entry.h）。
+      // Crop using the sprite entry's own dimensions, not canvas dimensions,
+      // so canvas resizing cannot push the source rectangle out of bounds.
       ctx.drawImage(
         entry.img,
         frame * frameW, 0, frameW, entry.h,
@@ -116,7 +116,7 @@
         frame = Math.max(0, Math.min(cfg.frames - 1, frame))
       } else if (frame >= cfg.frames) {
         if (cfg.playback === 'loop') frame = 0
-        else frame = cfg.frames - 1 // once：保持末帧
+        else frame = cfg.frames - 1 // Once playback holds the final frame.
       }
       step()
     } else if (!sheetCache.get(sheetKey(cfg.sheet))?.rendered) {
@@ -124,14 +124,14 @@
     }
   }
 
-  // ---- 随机穿梭/转身（对齐 whale-girl：静态态偶尔转身） ----
+  // Occasional facing changes mirror the web client's static-state behavior.
   function tickFacing(now, cfg) {
     if (animState === 'idle' || animState === 'think' || animState === 'wait') {
       if (facingAt === 0) facingAt = now + rand(10000, 25000)
       if (now >= facingAt) {
         flip = -flip
         facingAt = now + rand(10000, 25000)
-        // 立即重绘（否则等待下一帧推进）
+        // Redraw immediately instead of waiting for the next animation frame.
         const entry = sheetCache.get(sheetKey(cfg.sheet))
         if (entry?.rendered) {
           ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -150,14 +150,14 @@
     return min + Math.random() * (max - min)
   }
 
-  // ---- 切换动画状态 ----
+  // Switch animation state.
   let switchingState = false
   async function switchAnim(next) {
     const name = next?.name || 'idle'
     if (name === animState) {
       animCtx = next?.context ?? animCtx
-      // 同态早退兜底：初始 animState 即 'idle' 时（宿主空闲），首帧从没渲染——
-      // 引擎首个动画就是 idle，早退会跳过 ensureSheet 导致永远空白。补一次加载+绘制。
+      // Even when the initial animation is already idle, load and draw its first sheet;
+      // an unconditional same-state early return would leave an idle host blank forever.
       const cfg = stateCfg(name)
       if (cfg && !sheetCache.has(sheetKey(cfg.sheet))) {
         await ensureSheet(cfg)
@@ -174,7 +174,7 @@
     blinkAt = 0
     lastFrameAt = 0
     if (name === 'walk') {
-      // 进入游走：随机方向（素材朝左基准：向右走 dir=1 → flip=-1 镜像朝右）。
+      // Choose a random walk direction. Artwork faces left, so rightward movement mirrors it.
       walkDir = Math.random() < 0.5 ? 1 : -1
       flip = -walkDir
     }
@@ -213,13 +213,13 @@
     entry.rendered = true
   }
 
-  // ---- 内容 bbox → 点击穿透（宠物本体可交互，透明区点击穿透） ----
+  // Content bounds enable pet interactions while transparent regions pass pointer events through.
   function reportHitarea() {
     const cfg = stateCfg(animState)
     const entry = sheetCache.get(sheetKey(cfg?.sheet))
     if (!entry) { wg.setHitarea(null); return }
     const frameW = Math.floor(entry.w / framesOf(cfg))
-    // 读当前帧 Alpha（只在状态切换/变换后读一次，小图可接受）
+    // Read frame alpha after state or transform changes; small sprite readback is bounded.
     const off = document.createElement('canvas')
     off.width = frameW; off.height = entry.h
     const octx = off.getContext('2d')
@@ -237,7 +237,7 @@
       }
     }
     if (maxX < 0) { wg.setHitarea(null); return }
-    // 归一化到画布坐标（canvas.width / frameW 是缩放比）
+    // Convert source bounds into scaled canvas coordinates.
     const scaleX = canvas.width / frameW
     const scaleY = canvas.height / entry.h
     wg.setHitarea({
@@ -246,9 +246,9 @@
     })
   }
 
-  // ---- 主循环（60fps 够了；帧推进按 fps） ----
-  // ---- 游走位移：walk 状态期间窗口沿 walkDir 平移（对齐 web 版 45px/s），撞边反转 ----
-  const WALK_SPEED_PX = 45 // 与 whale-girl walk.speedPxPerSec 一致（CSS px/s，*dpr 转物理像素）
+  // Render at 60 fps; sprite advancement follows its configured fps.
+  // Walking moves the window horizontally at the web client's speed and reverses at screen edges.
+  const WALK_SPEED_PX = 45 // Match the web client's CSS-pixel speed; multiply by DPR for physical pixels.
   let walkDir = 0
   let lastWalkStepAt = 0
   function loop(now) {
@@ -264,13 +264,13 @@
       const dpr = window.devicePixelRatio || 1
       const dx = Math.round(WALK_SPEED_PX * 0.05 * walkDir * dpr)
       wg.dragWindow(dx, 0).then((hit) => {
-        if (hit) { walkDir = -walkDir; flip = -flip } // 撞边反转（素材朝左基准）
+        if (hit) { walkDir = -walkDir; flip = -flip } // Reverse at screen edges; the source artwork faces left.
       })
     }
     requestAnimationFrame(loop)
   }
 
-  // ---- 气泡 / 角标 ----
+  // Reply bubbles and status labels.
   function showBubble(text) {
     bubble.textContent = text
     bubble.classList.add('show')
@@ -286,10 +286,10 @@
     badge.classList.add('show')
   }
 
-  // ---- 交互：点击 / 拖拽 ----
+  // Click and drag interactions.
   let dragStart = null
-  let dragging = false // 拖拽中：显示 drag 状态并暂停游走位移（对齐 web 版拖拽动画）
-  let lastEngineAnim = null // 拖拽期间缓存的引擎动画（松手恢复）
+  let dragging = false // Show drag and pause walk displacement while the user drags.
+  let lastEngineAnim = null // Cache engine animation during dragging and restore it on release.
   canvas.addEventListener('pointerdown', (e) => {
     dragStart = { x: e.screenX, y: e.screenY, moved: false, px: e.screenX, py: e.screenY }
     canvas.setPointerCapture(e.pointerId)
@@ -303,15 +303,15 @@
       dragStart.px = e.screenX
       dragStart.py = e.screenY
       dragging = true
-      switchAnim({ name: 'drag', context: {} }) // 拖拽动画（覆盖引擎状态，游走位移随之暂停）
+      switchAnim({ name: 'drag', context: {} }) // Drag animation overrides engine state and suspends wandering displacement.
     }
     if (dragStart.moved) {
-      // delta 移动窗口（run6 验证路径）：窗口随光标平移，无反馈环 → 无抖动。
+      // Move the window by pointer delta without a feedback loop, preventing drag jitter.
       const ddx = e.screenX - dragStart.px
       const ddy = e.screenY - dragStart.py
       if (ddx !== 0 || ddy !== 0) {
-        // 拖拽方向 → 朝向（素材朝左基准：向左拖 flip=1 朝左、向右拖 flip=-1 镜像朝右，
-        // 对齐 web 版 drag 朝向逻辑）；方向变化立即重绘，动作间朝向连续。
+        // Dragging left preserves left-facing artwork; dragging right mirrors it.
+        // Redraw immediately when direction changes and preserve facing across actions.
         const nextFlip = ddx < 0 ? 1 : -1
         if (nextFlip !== flip) {
           flip = nextFlip
@@ -326,22 +326,22 @@
   })
   canvas.addEventListener('pointerup', (e) => {
     if (dragStart && !dragStart.moved) {
-      // 点击 = 互动：轮换 feed/play
+      // Clicks alternate feed/play interactions.
       const action = (sessionStorage.getItem('wg:lastAction') === 'feed') ? 'play' : 'feed'
       sessionStorage.setItem('wg:lastAction', action)
       wg.interact(action)
     }
     if (dragging) {
       dragging = false
-      // 恢复拖拽前的引擎动画（拖拽期间缓存；无则 idle）
+      // Restore the cached engine animation after dragging, or idle if none exists.
       switchAnim(lastEngineAnim ?? { name: 'idle', context: {} })
     }
     dragStart = null
   })
 
-  // ---- IPC 订阅 ----
+  // IPC subscriptions.
   wg.onAnim(async (anim) => {
-    if (dragging) { lastEngineAnim = anim; return } // 拖拽期间：缓存引擎动画，显示 drag
+    if (dragging) { lastEngineAnim = anim; return } // During dragging, cache incoming animation intents while continuing to show drag.
     await switchAnim(anim)
   })
   wg.onSnapshot((snap) => {
@@ -352,10 +352,10 @@
     if (reply) showBubble(reply)
   })
 
-  // ---- 启动 ----
+  // Startup.
   ;(async () => {
     manifest = await wg.getManifest()
-    // 默认角色
+    // Default character.
     if (manifest?.default) characterId = manifest.default
     applySize()
     await switchAnim({ name: 'idle', context: {} })

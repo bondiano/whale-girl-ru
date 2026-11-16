@@ -1,11 +1,8 @@
-// Electron 桌面渲染壳（main 进程）：
-// - 透明、无边框、置顶的宠物窗口
-// - 核心引擎（createCompanion）在本进程运行，hooks 把动画意图/快照/回话经 IPC 推给 renderer
-// - 渲染层零网络：manifest/sprite 由本进程拉取转 dataURL 再下发（绕过 CORS、单一数据通道）
-// - 退出时显式 {online:false}（companion.stop()），网页宠物即恢复
-//
-// 由于鲸鱼娘 sprite 站姿是「透明图 + 四周透明」，窗口需要精确贴合内容才不挡鼠标——
-// renderer 侧用 canvas 内容 bbox 计算实际不透明区，据此切换 ignoreMouseEvents（点击穿透）。
+// Electron main-process shell owns the transparent, frameless, always-on-top window.
+// The companion engine sends animation/snapshot/reply data through IPC.
+// Rendering has no network access: main fetches assets and supplies data URLs.
+// Shutdown goes offline explicitly to restore the web pet.
+// Canvas alpha bounds determine pointer passthrough around transparent sprite regions.
 
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join, dirname } from 'node:path'
@@ -22,12 +19,10 @@ const DEFAULT_SIZE = 110
 let win = null
 let companion = null
 
-/**
- * 创建透明置顶宠物窗口。
- */
+/** Create a transparent, always-on-top pet window. */
 function createWindow() {
   win = new BrowserWindow({
-    width: DEFAULT_SIZE + 40,   // 稍大留呼吸边（视觉 shadow 余量）
+    width: DEFAULT_SIZE + 40,   // Leave extra room for visual shadow.
     height: DEFAULT_SIZE + 40,
     transparent: true,
     frame: false,
@@ -38,29 +33,27 @@ function createWindow() {
     fullscreenable: false,
     maximizable: false,
     minimizable: false,
-    // 只加载本地 render/ 页面（file://）+ 本机 IPC；不开 remote。
+    // Load only the local renderer page and local IPC; do not enable remote access.
     webPreferences: {
       preload: join(RENDER_DIR, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox:true —— preload 只用 contextBridge/ipcRenderer（sandboxed preload 原生可用）；
-      // renderer 无 Node 全局、只暴露 whaleGirl.*，安全边界最大化（Copilot 建议）。
+      // Sandboxed preload uses only contextBridge/ipcRenderer.
+      // The renderer has no Node globals and sees only the whaleGirl API.
       sandbox: true,
     },
   })
   win.setAlwaysOnTop(true, 'screen-saver')
   win.loadFile(join(RENDER_DIR, 'index.html'))
 
-  // 默认点击穿透（只有宠物本体可交互）——renderer 每帧回调真实 bbox。
+  // Default to pointer passthrough; the renderer reports actual content bounds.
   win.setIgnoreMouseEvents(true, { forward: true })
 
   win.on('closed', () => { win = null })
   return win
 }
 
-/**
- * 主进程骨架：加载 manifest/sprite，喂给 renderer。
- */
+/** Main-process renderer bridge loads the manifest and sprite sheets. */
 function setupIpc(client) {
   const sheetCache = new Map() // `${characterId}/${sheet}` → dataURL
 
@@ -95,15 +88,14 @@ function setupIpc(client) {
     if (companion) await companion.interact(action === 'play' ? 'play' : 'feed')
   })
 
-  // 渲染层告知宠物内容 bbox → 切换点击穿透（桌面宠物不挡非宠物区域）：
-  // 有内容（宠物可见）→ 窗口可交互（点击投喂/拖拽）；null（占位/空）→ 全透。
-  // P2 增强：可进一步把窗口缩到内容 bbox 精确贴合（见 DESIGN §6 风险对策）。
+  // Content bounds control pointer passthrough: visible content enables interactions;
+  // a null placeholder remains transparent. Exact window shrinking is a separate enhancement.
   ipcMain.on('wg:set-hitarea', (_e, rect) => {
     if (!win) return
     win.setIgnoreMouseEvents(rect === null, { forward: true })
   })
 
-  // 渲染层拖拽移动窗口：告知屏幕 delta（让宠物可拖动换位）
+  // Move the desktop window by the renderer's screen-space drag delta.
   ipcMain.on('wg:drag-window', (_e, { dx, dy }) => {
     if (!win) return
     const [x, y] = win.getPosition()
@@ -111,9 +103,7 @@ function setupIpc(client) {
   })
 }
 
-/**
- * 启动桌面渲染（Electron main 路径入口）。
- */
+/** Start the Electron desktop shell. */
 export async function runDesktop({ cfg, log }) {
   const client = createClient({ baseURL: cfg.baseURL })
 
@@ -141,10 +131,10 @@ export async function runDesktop({ cfg, log }) {
     app.quit()
   }
   app.on('before-quit', (e) => {
-    // 幂等：before-quit 可多次触发
+    // Keep shutdown idempotent because before-quit may fire repeatedly.
   })
   app.on('window-all-closed', () => {
-    // 宠物窗口关闭 = 退出（不留后台）
+    // Closing the pet window exits instead of leaving a background process.
     shutdown()
   })
   process.on('SIGINT', shutdown)

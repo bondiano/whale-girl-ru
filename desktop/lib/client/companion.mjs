@@ -1,11 +1,7 @@
-// 桌面伴侣核心引擎：组装 heartbeat（presence 心跳）+ 状态轮询 + SSE 即时刷新 + 本地调度。
-// 与渲染解耦：只产出「当前动画意图 + 状态快照」，由外层决定如何展示
-// （headless 打日志 / Electron 画桌面）。纯 Node ESM，可被 Node 测试与 Electron main 复用。
-//
-// 对 whale-girl 的写面仅两个公开端点：
-// - POST /presence …… 显示层心跳（P0-1）
-// - POST /interact   …… 用户投喂/玩耍（P1-1）
-// 其余全部只读。账本（XP/称号）由 whale-girl 独占，本引擎绝不改写。
+// Desktop companion engine combines presence heartbeats, state polling, SSE,
+// and local scheduling. It emits animation intents and snapshots for headless or desktop rendering.
+// Only presence and interact are writable endpoints. The plugin exclusively owns
+// XP/titles and the ledger; this engine never rewrites them.
 
 import { createClient } from './http.mjs'
 import { createSSEClient } from './events.mjs'
@@ -14,16 +10,16 @@ import { ROUTE_PREFIX } from './utils.mjs'
 import { createScheduler, stepScheduler, applyInteraction } from './scheduler.mjs'
 import { pickAnimation } from './state.mjs'
 
-/** 本地调度 tick（比 pollMs 更密：睡眠/游走/工作插曲需要细粒度推进）。 */
+/** Local scheduling ticks faster than polling to advance sleep, wandering, and working interludes. */
 const TICK_MS = 250
 
 /**
- * 启动桌面伴侣引擎。
- * @param {object} opts 见 src/config.mjs loadConfig()
- * @param {object} [hooks] 渲染层 / 日志回调
- * @param {(snapshot: object) => void} [hooks.onSnapshot] 每次 /state 轮询后的快照回调
- * @param {(anim: {name: string, context: object}) => void} [hooks.onAnimation] 动画意图变化回调
- * @param {(reply: string) => void} [hooks.onReply] interact 回话气泡回调
+ * Start the desktop companion engine.
+ * @param {object} opts Connection/runtime options from loadConfig().
+ * @param {object} [hooks] Rendering or logging callbacks.
+ * @param {(snapshot: object) => void} [hooks.onSnapshot] Called after a state refresh.
+ * @param {(anim: {name: string, context: object}) => void} [hooks.onAnimation] Called when animation intent changes.
+ * @param {(reply: string) => void} [hooks.onReply] Interaction bubble callback.
  * @returns {{ client, stop: () => Promise<void>, interact: (action:'feed'|'play') => Promise<void>, getState: () => object }}
  */
 export async function createCompanion(opts, hooks = {}) {
@@ -33,15 +29,15 @@ export async function createCompanion(opts, hooks = {}) {
     routePrefix: opts.routePrefix ?? ROUTE_PREFIX,
   })
 
-  // —— 运行时状态 ——
-  let snapshot = null            // 最近一次 /state
-  let remoteConfig = null        // /config 的 config
-  let anim = { name: 'idle', context: {} } // 最近派生动画意图
+  // Runtime state.
+  let snapshot = null            // Latest state response.
+  let remoteConfig = null        // Current server configuration.
+  let anim = { name: 'idle', context: {} } // Most recently derived animation intent.
   let stopped = false
   const sched = createScheduler({ sleepAfterMs: opts.sleepAfterMs })
 
-  // 配置跟随：configRevision 门控（变化才重应用 /config，避免每 3s 拉一次）。
-  // P1-4 预留：/config 拉取已就位，size/opacity 跟随渲染尚未实现（见 DESIGN P1-4）。
+  // Fetch and reapply server configuration only when configRevision changes.
+  // Renderer size/opacity following is a separate desktop capability documented in DESIGN.
   let lastConfigRevision = -1
   const applyRemoteConfig = async () => {
     if (snapshot === null || typeof snapshot.configRevision !== 'number') return
@@ -55,7 +51,7 @@ export async function createCompanion(opts, hooks = {}) {
     }
   }
 
-  // 派生动画意图并回调渲染层（幂等：只通知变化）。
+  // Derive animation intent and notify rendering only when it changes.
   let lastAnimName = null
   const computeAnimation = () => {
     const next = pickAnimation(snapshot, sched)
@@ -68,15 +64,14 @@ export async function createCompanion(opts, hooks = {}) {
     return next
   }
 
-  // —— 状态轮询 ——
-  // 并发守卫（Copilot）：refreshState 可能被 setInterval / SSE 事件 / interact 同时调用。
-  // 用 in-flight + coalesce 保证同一时刻仅一个请求在途：在途期间到达的调用打标记，
-  // 完成后若期间有新的刷新请求则再跑一次，避免并发覆盖与竞态，也不丢最新状态。
+  // State polling coalesces refreshes from timers, SSE, and interactions.
+  // Keep one request in flight; a refresh arriving during it schedules one follow-up
+  // so concurrent responses cannot race and the latest state is not lost.
   let refreshing = false
   let pendingRefresh = false
   const refreshState = async () => {
     if (refreshing) {
-      pendingRefresh = true // 在途：coalesce，待本轮结束再触发一轮
+      pendingRefresh = true // Coalesce an in-flight refresh and request one follow-up.
       return null
     }
     refreshing = true
@@ -92,7 +87,7 @@ export async function createCompanion(opts, hooks = {}) {
           if (!pendingRefresh) return body
         } catch (err) {
           log.warn('GET /state 失败:', err.message)
-          // 在途期间若有新的刷新请求积累，仍重试一轮
+          // Run another refresh if requests accumulated while this one was in flight.
           return null
         }
       } while (pendingRefresh)
@@ -103,7 +98,7 @@ export async function createCompanion(opts, hooks = {}) {
     }
   }
 
-  // —— SSE 即时刷新（事件 → 立即 /state，延迟降到单次往返）——
+  // SSE events refresh state immediately, reducing latency to one round trip.
   let sse = null
   const startSSE = () => {
     if (opts.eventsEnabled === false) return
@@ -117,8 +112,8 @@ export async function createCompanion(opts, hooks = {}) {
     sse.events.on('error', (err) => log.warn('SSE:', err.message))
   }
 
-  // —— presence 心跳（15s；退出时 {online:false} 清理）——
-  // AbortSignal 超时：退出/下线时不因 DSH web 瞬时不可达而挂死（reviewer 建议）。
+  // Presence heartbeats run every 15 seconds; shutdown sends online:false.
+  // Bound requests with AbortSignal so an unreachable host cannot stall exit.
   const PRESENCE_TIMEOUT_MS = 2000
   const sendPresence = async (online) => {
     const controller = new AbortController()
@@ -139,8 +134,8 @@ export async function createCompanion(opts, hooks = {}) {
     heartbeatTimer = setInterval(() => sendPresence(true), opts.heartbeatMs)
   }
 
-  // 启动
-  if (opts.autoPresence !== false) await sendPresence(true) // 立即宣告在场（网页端据此隐藏宠物）
+  // Start the engine.
+  if (opts.autoPresence !== false) await sendPresence(true) // Announce presence immediately so the web pet can hide.
   startHeartbeat()
   await refreshState()
   startSSE()
@@ -151,11 +146,11 @@ export async function createCompanion(opts, hooks = {}) {
     computeAnimation()
   }, TICK_MS)
 
-  // —— 互动（P1-1）——
+  // User interactions.
   const interact = async (action = 'feed') => {
     try {
       const body = await client.interact(action)
-      applyInteraction(sched, action, Date.now()) // 本地瞬发/喜悦/唤醒（带注入时间源）
+      applyInteraction(sched, action, Date.now()) // Apply local transient, joy, and wake effects using the injected clock.
       const reply = body?.reply ?? null
       log.info(`互动 ${action}: ${reply ?? ''}`)
       hooks.onReply?.(reply)
@@ -168,7 +163,7 @@ export async function createCompanion(opts, hooks = {}) {
     }
   }
 
-  // —— 停止清理 ——
+  // Shutdown cleanup.
   const stop = async () => {
     if (stopped) return
     stopped = true
@@ -177,7 +172,7 @@ export async function createCompanion(opts, hooks = {}) {
     clearInterval(tickTimer)
     if (sse) sse.close()
     if (opts.cleanupOnExit !== false) {
-      await sendPresence(false) // 显式下线，网页宠物立即恢复
+      await sendPresence(false) // Explicitly go offline so the web pet reappears immediately.
     }
     log.info('伴侣已停止（presence 已下线）')
   }

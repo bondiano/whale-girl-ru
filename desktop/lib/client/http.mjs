@@ -1,13 +1,11 @@
-// HTTP 消费者封装：对 whale-girl 端点的只读 + 写面（interact/presence）。
-// 全部原生 fetch（Node ≥18 全局），零第三方依赖。
-// 契约对齐：见 DESIGN.md §3；isCrossOrigin 若本地调用缺 Origin/Sec-Fetch-Site 视为同源（已验证）。
-//
-// 错误语义：网络/HTTP 异常抛出带 status 的错误；调用方据此区分瞬态/终态。
+// Native-fetch HTTP client for pet reads plus interact/presence writes.
+// Local requests without Origin/Sec-Fetch-Site follow the host's same-origin contract.
+// Network and HTTP errors throw with status so callers can distinguish failures.
 
 import { ROUTE } from './utils.mjs'
 
 /**
- * 创建绑定到指定 BaseURL 的 whale-girl HTTP 客户端。
+ * Create a pet HTTP client bound to one base URL.
  * @param {{ baseURL: string, routePrefix?: string, pollMs?: number }} opts
  */
 export function createClient({ baseURL, routePrefix = '/whale-girl' }) {
@@ -43,19 +41,19 @@ export function createClient({ baseURL, routePrefix = '/whale-girl' }) {
     /** GET /sessions → Array<{ id, title, activity, since }> */
     getSessions: () => request('GET', '/sessions'),
 
-    /** GET /assets/manifest.json → 角色/状态/帧配置 */
+    /** Fetch character, state, and frame configuration from the asset manifest. */
     getManifest: () => request('GET', '/assets/manifest.json'),
 
     /**
-     * POST /presence → { online: boolean }
-     * @param {boolean} online true=上线续命，false=立即下线
-     * @param {{signal?: AbortSignal}} [opts] 可选 AbortSignal（退出清理超时用）
+     * Update presence.
+     * @param {boolean} online true renews presence; false goes offline immediately.
+     * @param {{signal?: AbortSignal}} [opts] Optional shutdown timeout signal.
      */
     setPresence: (online = true, opts = {}) => request('POST', '/presence', { online }, opts),
 
     /**
-     * POST /interact → { pet, reply }
-     * @param {'feed'|'play'} action 投喂/玩耍（纯乐趣，零账本写面）
+     * Submit an interaction and receive { pet, reply }.
+     * @param {'feed'|'play'} action Enjoyment-only interaction, without direct ledger mutation.
      */
     interact: (action = 'feed') => request('POST', '/interact', { action }),
   }

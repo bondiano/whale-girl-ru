@@ -1,37 +1,33 @@
-// whale-girl-desktop 本地配置：桌面端运行参数（与 whale-girl /whale-girl/config 的
-// 体验层配置分开——这里管「桌面端如何连接与跑」，不是 whale-girl 的宠物配置）。
-//
-// 契约红线：
-// - BaseURL 指向 DSH web 服务（默认 http://127.0.0.1:3080）。
-// - pollMs / heartbeatMs / presenceTTLMs 需与 whale-girl /presence 契约匹配：
-//   心跳窗口 45s，每 15s 续命一次（heartbeatMs < presenceTTLMs，留足余量）。
-// - 运行时参数可由 CLI / 环境变量覆盖（见 loadConfig）。
+// Desktop runtime configuration controls connection and execution, separately
+// from the pet's server-side experience settings. The default web base is loopback:3080.
+// Presence renews every 15 seconds within a 45-second TTL.
+// CLI arguments and environment variables override defaults through loadConfig().
 
 export const DEFAULTS = Object.freeze({
-  // DSH web 服务根
+  // DSH web server root.
   baseURL: 'http://127.0.0.1:3080',
-  // 路由前缀（与 whale-girl lib/src/routes.mjs 单一来源一致，勿手写漂移）
+  // Route prefix matches the plugin's authoritative routes module.
   routePrefix: '/whale-girl',
-  // 状态轮询间隔（whale-girl 默认 pollMs=3000）
+  // State polling interval matches the plugin's 3000 ms default.
   pollMs: 3000,
-  // presence 心跳间隔（whale-girl PRESENCE_TTL_MS=45s；15s 续命 < 45s 余量充分）
+  // Renew presence every 15 seconds, safely within the 45-second TTL.
   heartbeatMs: 15000,
-  // SSE 事件流：收到事件即触发一次 /state 刷新
+  // Refresh state immediately when the SSE stream reports an event.
   eventsEnabled: true,
-  // 启动时是否自动宣告在线（--headless 也心跳，让网页端隐藏宠物）
+  // Announce presence automatically at startup, including headless mode, so the web pet hides.
   autoPresence: true,
-  // 退出时是否显式下线（{online:false}）
+  // Explicitly send online:false during shutdown.
   cleanupOnExit: true,
-  // 渲染层开关：false 时只跑核心（心跳+状态+SSE，不弹桌面窗）
+  // When rendering is disabled, run heartbeats, state polling, and SSE without a desktop window.
   renderEnabled: true,
-  // 宠物默认尺寸（px；跟随 /config.size 热更新）
+  // Default pet size in pixels, followed by live server configuration updates.
   size: 110,
-  // 文字角标/气泡开关
+  // Enable text badges and reply bubbles.
   showStatus: true,
 })
 
 /**
- * 解析合并后的运行配置：环境变量 DSH_* 与 CLI 覆盖缺省。
+ * Merge runtime defaults with DSH_* environment variables and CLI overrides.
  * @param {{env?: Record<string,string|undefined>, argv?: string[]}} [ctx]
  * @returns {object}
  */
@@ -57,7 +53,7 @@ export function loadConfig({ env = process.env ?? {}, argv = process.argv ?? [] 
   return cfg
 }
 
-/** whale-girl /config 返回的体验层配置（消费端只读；走 configRevision 门控）。 */
+/** Read-only experience settings returned by the server; reload only when configRevision changes. */
 export const REMOTE_DEFAULTS = Object.freeze({
   enabled: true, size: 110, opacity: 1, pollMs: 3000,
 })

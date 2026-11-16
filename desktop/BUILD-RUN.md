@@ -18,14 +18,14 @@
 
 ```sh
 cd desktop
-npm install        # 引擎零运行时依赖（Node 引擎脚本无第三方包）
+npm install        # The Node engine has no third-party runtime dependencies
 ```
 
 **桌面渲染壳（Tauri，推荐）**——构建 Rust 侧（首次编译 tauri 依赖树约 5-15 分钟）：
 
 ```sh
 cd desktop/src-tauri
-cargo build        # 产物 target/debug/whale-girl-desktop（CARGO_TARGET_DIR 可指 /tmp 保持仓库干净）
+cargo build        # Output: target/debug/whale-girl-desktop; set CARGO_TARGET_DIR=/tmp to keep the repo clean
 ```
 
 **Electron 遗留壳（可选）**：`npm i -D electron`（二进制约 277MB；国内网络超时用
@@ -36,8 +36,8 @@ cargo build        # 产物 target/debug/whale-girl-desktop（CARGO_TARGET_DIR �
 ### 桌面模式（推荐）——Tauri 渲染壳
 
 ```sh
-cd desktop/src-tauri && cargo run          # 或直接运行编译产物
-# 指向非本机 DSH：
+cd desktop/src-tauri && cargo run          # Or run the compiled binary
+# Connect to a remote DSH:
 WHALE_GIRL_BASE_URL=http://IP:PORT cargo run
 ```
 
@@ -47,7 +47,7 @@ WHALE_GIRL_BASE_URL=http://IP:PORT cargo run
 ### 桌面模式（遗留）——Electron 渲染壳
 
 ```sh
-cd desktop && npm run start:desktop        # electron .（需先 npm i -D electron）
+cd desktop && npm run start:desktop        # electron .; install with npm i -D electron first
 ```
 
 ### Headless 模式（核心自测 / 无桌面环境）
@@ -61,11 +61,11 @@ npm run start:headless     # node lib/index.mjs --headless
 ### 其他启动参数
 
 ```sh
-node lib/index.mjs --base-url=http://IP:PORT   # 指向非本机 DSH
-node lib/index.mjs --poll-ms=5000              # 轮询间隔
-node lib/index.mjs --no-presence               # 不接管在场上线（不隐藏网页宠物）
-node lib/index.mjs --no-render                 # 同 --headless
-node lib/index.mjs --render-json               # JSON-lines 渲染桥（供 Tauri/Swift 等外壳消费）
+node lib/index.mjs --base-url=http://IP:PORT   # Connect to a remote DSH
+node lib/index.mjs --poll-ms=5000              # Poll interval
+node lib/index.mjs --no-presence               # Do not claim presence or hide the browser pet
+node lib/index.mjs --no-render                 # Same as --headless
+node lib/index.mjs --render-json               # JSON-lines rendering bridge for Tauri/Swift shells
 ```
 
 环境变量：`WHALE_GIRL_BASE_URL` / `WHALE_GIRL_POLL_MS` / `WHALE_GIRL_HEARTBEAT_MS`。

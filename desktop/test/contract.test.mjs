@@ -1,10 +1,5 @@
-// whale-girl-desktop 契约测试：
-// 1. 纯函数单测：状态机（state.mjs / scheduler.mjs / behaviors.mjs）确定性映射
-// 2. 端到端契约测试：连真实 DSH web（/state /config /presence /interact /assets）
-//    —— 验证本端点到 whale-girl 的消费契约与 DESIGN.md §3 一致
-//
-// 运行：npm test（node --test test/）。
-// 端到端部分需要 DSH web 在 http://127.0.0.1:3080（WHALE_GIRL_BASE_URL 可覆盖）。
+// Desktop contract tests cover pure state selection and optional live host integration.
+// The live suite defaults to loopback:3080; WHALE_GIRL_BASE_URL overrides it.
 
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,10 +13,9 @@ import { STATE_NAMES } from '../lib/client/state-names.mjs'
 
 const BASE = loadConfig().baseURL
 
-// live 套件依赖真实 DSH web。探活一次（缓存）来给 describe 动态 skip：
-// 服务不可达 → 套件整体 skip（CI / 无服务环境不误判失败）；WG_LIVE=1 则强制要求真跑。
-// 探活须校验响应是 whale-girl /state 的 JSON 契约（content-type），不能只看 HTTP 成功——
-// 其他服务占用 baseURL（如 DSH GUI 对未知路由回 SPA 壳 200 text/html）会误判在线。
+// Probe live availability once and cache it. Unreachable services skip the live suite
+// unless WG_LIVE=1 requires execution. Validate the state JSON/content type so an
+// unrelated service or SPA HTML fallback cannot be mistaken for the pet endpoint.
 let _liveProbe = null
 async function liveReachable() {
   if (_liveProbe === null) {
@@ -38,7 +32,7 @@ async function liveReachable() {
 const liveAvailable = await liveReachable()
 const forceLive = process.env.WG_LIVE === '1'
 
-// ---------- 状态机纯函数 ----------
+// Pure state-machine tests.
 
 describe('state machine (pickState)', () => {
   const now = 1_000_000
@@ -83,7 +77,7 @@ describe('state machine (pickState)', () => {
       pickState({ activity: { name: 'idle', until: 0 }, now, celebrateUntil: now + 1000 }),
       'celebrate',
     )
-    // 事件 burst 覆盖回合完成庆祝
+    // Event bursts outrank local turn-completion celebration.
     assert.equal(
       pickState({ activity: { name: 'error', until: now + 500 }, now, celebrateUntil: now + 1000 }),
       'error',
@@ -130,7 +124,7 @@ describe('scheduler (stepScheduler + applyInteraction)', () => {
 
   it('会话活跃重置空闲起点（不因工作期误判睡眠）', () => {
     const s = createScheduler()
-    // 先 idle 60s（睡），然后 working
+    // Start with 60 idle seconds, then become working.
     stepScheduler(s, { snapshot: { activity: { name: 'idle', until: 0 } }, now })
     stepScheduler(s, { snapshot: { activity: { name: 'idle', until: 0 } }, now: now + 61_000 })
     assert.equal(s.sleeping, true)
@@ -170,7 +164,7 @@ describe('state names', () => {
   })
 })
 
-// ---------- SSE 客户端 ----------
+// SSE client tests.
 
 describe('SSE client', () => {
   it('解析 data 事件并触发回调（本地 http server 模拟）', async () => {
@@ -201,8 +195,8 @@ describe('SSE client', () => {
   })
 })
 
-// ---------- 端到端契约（需 DSH web 运行中） ----------
-// live 套件依赖真实 DSH web。服务不可达时整组 skip（CI 不误判）；WG_LIVE=1 强制真跑（不可达即失败）。
+// Live end-to-end contracts require a running host. Unreachable hosts skip
+// unless WG_LIVE=1 explicitly requires a live run.
 
 describe('whale-girl contract (live)', { skip: !liveAvailable && !forceLive }, () => {
   let client
@@ -242,7 +236,7 @@ describe('whale-girl contract (live)', { skip: !liveAvailable && !forceLive }, (
   it('POST /presence {online:true} → 在线；{online:false} → 下线', async () => {
     const up = await client.setPresence(true)
     assert.equal(up.online, true)
-    // 状态里 companionOnline 应同步
+    // Presence must be reflected in companionOnline.
     const st = await client.getState()
     assert.equal(st.companionOnline, true)
     const down = await client.setPresence(false)

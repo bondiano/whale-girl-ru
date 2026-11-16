@@ -9,20 +9,20 @@
 ## 安装
 
 ```sh
-npm i -g whale-girl-desktop          # 或项目内 npm i whale-girl-desktop
-# 桌面渲染壳需要 Rust 工具链（cargo）：
+npm i -g whale-girl-desktop          # Or npm i whale-girl-desktop within a project
+# The desktop shell requires Rust (cargo):
 cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release
 ```
 
 ## 使用
 
 ```sh
-# 无窗模式（presence 心跳 + 状态轮询 + SSE，自测/CI/无桌面环境）
+# Headless: presence, state polling and SSE for tests/CI
 whale-girl-desktop --headless
 
-# 桌面宠物（透明置顶窗）——需先 cargo build --release
+# Transparent, always-on-top pet; run cargo build --release first
 "$(npm root -g)/whale-girl-desktop/src-tauri/target/release/whale-girl-desktop"
-# 或从源码仓库：cd desktop && npm run build:tauri && npm run start:tauri
+# From source: cd desktop && npm run build:tauri && npm run start:tauri
 ```
 
 指向非本机 DSH：`WHALE_GIRL_BASE_URL=http://IP:PORT`（默认 `http://127.0.0.1:3080`）。

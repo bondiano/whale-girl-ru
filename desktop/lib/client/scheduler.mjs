@@ -1,11 +1,6 @@
-// 本地行为调度器：驱动桌面端在 /state 之外的本地节奏——睡眠（sleep）、
-// 游走（walk 动画意图）、working 随机插曲、interact 瞬发（eat/play/joy/wake）。
-//
-// 与 whale-girl runtime 解耦：/state 只给「事实窗口」（activity burst、sessionThink、
-// sessionWait、turnCompletedUntil），本地调度补「节奏」（睡/醒、走、工作插曲、互动瞬发）。
-// 所有字段是纯数据（可序列化），由引擎每个 tick 调用 step() 推进。
-//
-// 默认节奏参数与 whale-girl client 对齐（见 DESIGN.md §3）。
+// Local scheduler advances sleep, walk, working interludes, and eat/play/joy/wake transients.
+// Server snapshots provide event windows and session facts; local ticks provide rhythm.
+// State is serializable data, advanced by step() with defaults matching the web client.
 
 import {
   JOY_MS, TRANSIENT_MS, SLEEP_AFTER_MS,
@@ -17,13 +12,13 @@ function rand(min, max) {
   return min + Math.random() * (max - min)
 }
 
-/** 初始调度状态。 */
+/** Initial scheduler state. */
 export function createScheduler({ sleepAfterMs = SLEEP_AFTER_MS } = {}) {
   return {
     sleepAfterMs,
-    idleSince: 0,          // 进入 idle 的时刻（睡眠由此起算）
-    sleeping: false,       // 当前是否打盹
-    joyUntil: 0,           // interact 后喜悦窗口
+    idleSince: 0,          // Idle entry timestamp; sleep counting starts here.
+    sleeping: false,       // Whether the pet is currently sleeping.
+    joyUntil: 0,           // Joy window after interaction.
     transient: null,       // 'eat'|'play'|'wake'|null
     transientUntil: 0,
     walking: false,
@@ -34,21 +29,21 @@ export function createScheduler({ sleepAfterMs = SLEEP_AFTER_MS } = {}) {
 }
 
 /**
- * 每 tick 推进调度（调用引擎的轮询刷新）。
- * @param {object} sched 调度状态
+ * Advance the scheduler for one engine tick.
+ * @param {object} sched Scheduler state.
  * @param {object} ctx
- * @param {object} ctx.snapshot /state 快照（activity 等）
+ * @param {object} ctx.snapshot Server state snapshot.
  * @param {number} ctx.now
  */
 export function stepScheduler(sched, { snapshot, now = Date.now() } = {}) {
   const act = snapshot?.activity ?? { name: 'idle', until: 0 }
-  // 瞬发复位（eat/play/wake 播完或超时）
+  // Clear eat/play/wake after playback or timeout.
   if (sched.transient !== null && now >= sched.transientUntil) {
     const wasFun = sched.transient === 'eat' || sched.transient === 'play'
     sched.transient = null
     if (wasFun) sched.joyUntil = now + JOY_MS
   }
-  // 会话活跃性 → 空闲起算 / 睡眠
+  // Use session activity to update idle timing and sleep.
   const isActive = act.name !== 'idle' || act.until > now
   if (isActive) {
     sched.idleSince = 0
@@ -57,8 +52,8 @@ export function stepScheduler(sched, { snapshot, now = Date.now() } = {}) {
   }
   sched.sleeping = act.name === 'idle' && sched.idleSince !== 0 && now - sched.idleSince > sched.sleepAfterMs
 
-  // working 随机插曲（仅会话思考期间武装；到点才重新决策——nextWorkingRhythm 返回
-  // 的 until 是「新阶段结束时刻」，不能每 tick 无条件翻转，否则 think/working 高频抖动）
+  // Arm working interludes only during session thinking, and reconsider only at
+  // the stage boundary; unconditional decisions every tick would rapidly flicker think/working.
   if (act.sessionThink !== true) {
     if (sched.working.active !== false || sched.working.until !== 0) {
       sched.working = { active: false, until: 0 }
@@ -67,7 +62,7 @@ export function stepScheduler(sched, { snapshot, now = Date.now() } = {}) {
     sched.working = nextWorkingRhythm({ now, sessionThink: true, working: sched.working })
   }
 
-  // 游走节奏（简单周期：空闲时偶尔走一段；离开空闲即重置排程，避免回空闲时立刻走）
+  // Occasionally wander while idle. Leaving idle resets the schedule to avoid immediate wandering on return.
   if (sched.walking) {
     if (now >= sched.nextWalkAt) {
       sched.walking = false
@@ -81,16 +76,17 @@ export function stepScheduler(sched, { snapshot, now = Date.now() } = {}) {
     }
   } else {
     if (sched.walking) sched.walking = false
-    sched.nextWalkAt = 0 // 非空闲：游走排程复位
+    sched.nextWalkAt = 0 // Reset the wander schedule outside idle.
   }
 
   return sched
 }
 
-/** interact 后重置空闲 + eat/play 瞬发（对齐 whale-girl：互动瞬发优先于醒觉——
- *  喂食/玩耍直接播 eat/play；wake 只用于拖拽放下等非互动路径，桌面端无拖拽故不产生）。
- *  `now` 显式注入（默认 Date.now()），与 stepScheduler 的可测时间源保持一致
- *  （Copilot：允许测试注入确定性时间，而非直接调用 Date.now()）。 */
+/**
+ * Reset idle and start eat/play after interaction; these outrank wake.
+ * Wake is reserved for non-interaction paths such as drag release.
+ * An explicit now keeps this boundary deterministic with scheduler tests.
+ */
 export function applyInteraction(sched, action, now = Date.now()) {
   const decision = wakeFromInteraction({ sleeping: sched.sleeping })
   sched.sleeping = decision.sleeping

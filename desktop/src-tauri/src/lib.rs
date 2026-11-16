@@ -1,11 +1,10 @@
-// Tauri 渲染壳：透明置顶窗 + Node 引擎子进程（--render-json）桥。
+// Tauri rendering shell: a transparent always-on-top window bridging a Node engine subprocess (--render-json).
 //
-// 职责与 Electron main（lib/render/window.mjs）对齐：
-// - 拉起引擎子进程，stdout JSON 行（anim/snapshot/reply/ready）→ Tauri 事件
-// - 命令面（webview invoke）：get_manifest / get_sheet（资产经本进程拉取转 dataURL，
-//   与 Electron 的「渲染层零网络」一致）/ interact（写引擎 stdin）/ set_hitarea（点击穿透）/
-//   drag_window（移动窗口）
-// - 资产拉取用 ureq（原生 HTTP，无 CORS 面）
+// Responsibilities match Electron main (lib/render/window.mjs):
+// - Launch the engine and forward stdout JSON lines (anim/snapshot/reply/ready) as Tauri events.
+// - Webview commands: get_manifest/get_sheet fetch assets here and return data URLs, keeping the renderer network-free;
+//   interact writes engine stdin, set_hitarea controls click-through, and drag_window moves the window.
+// - Fetch assets through native ureq HTTP, outside the browser CORS boundary.
 use serde::Serialize;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -13,10 +12,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, Window};
 
-/// 引擎子进程句柄（stdin 写 interact/stop 命令）。
+/// Engine subprocess handle; interact/stop commands are written to stdin.
 struct Engine(Mutex<Option<Child>>);
 
-/// 运行态（引擎地址等）。
+/// Runtime state, including the engine base URL.
 #[derive(Clone, Serialize)]
 struct AppState {
     base_url: String,
@@ -35,7 +34,7 @@ fn get_manifest(state: tauri::State<AppState>) -> Result<serde_json::Value, Stri
 
 #[tauri::command]
 fn get_sheet(state: tauri::State<AppState>, character_id: String, sheet: String) -> Result<String, String> {
-    // sheet 含扩展名（manifest cfg.sheet），路径随角色目录；与主仓 assets 路由契约一致。
+    // sheet includes its extension from manifest cfg.sheet; resolve it under the character directory, matching the asset route contract.
     let url = format!(
         "{}/whale-girl/assets/characters/{}/{}",
         state.base_url, character_id, sheet
@@ -64,13 +63,13 @@ fn interact(engine: tauri::State<Engine>, action: String) {
 
 #[tauri::command]
 fn set_hitarea(window: Window, rect: Option<serde_json::Value>) {
-    // 有内容 bbox → 可交互（点击投喂/拖拽）；null（占位/空）→ 点击穿透。
+    // A content bounding box enables feeding/dragging; null for an empty or placeholder frame enables click-through.
     let _ = window.set_ignore_cursor_events(rect.is_none());
 }
 
 #[tauri::command]
 fn drag_window(window: Window, dx: f64, dy: f64) -> Result<bool, String> {
-    // 移动窗口并 clamp 到所在显示器边界；返回是否水平撞边（游走反转朝向用）。
+    // Move within the current monitor bounds and report horizontal collisions so wandering can reverse direction.
     let mut pos = window.outer_position().map_err(|e| e.to_string())?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     pos.x += dx as i32;
@@ -100,7 +99,7 @@ fn drag_window(window: Window, dx: f64, dy: f64) -> Result<bool, String> {
     Ok(hit_x)
 }
 
-/// 原生窗口拖拽接管（macOS：平滑跟随光标，不受窗口边界/指针捕获限制）。
+/// Hand off to native window dragging; on macOS it follows the cursor without window-edge or pointer-capture limits.
 #[tauri::command]
 fn start_drag(window: Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
@@ -116,8 +115,8 @@ pub fn run() {
             base_url: base_url.clone(),
         })
         .setup(move |app| {
-            // 拉起 Node 引擎（--render-json）：stdout JSON 行 → Tauri 事件。
-            // 引擎路径按源码树相对本 manifest 目录解析（交付方式 A：仓库目录运行）。
+            // Launch the Node engine (--render-json) and forward stdout JSON lines as Tauri events.
+            // Resolve the engine relative to the manifest directory for execution from the source checkout.
             let engine_main = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/index.mjs");
             let mut child = Command::new("node")
                 .arg(&engine_main)

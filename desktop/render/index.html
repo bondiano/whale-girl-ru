@@ -15,11 +15,11 @@
     #stage {
       position: fixed; inset: 0;
       display: grid; place-items: center;
-      pointer-events: none; /* 视口层的点击穿透：只有 pet 本体可交互 */
+      pointer-events: none; /* The viewport is click-through; only the pet itself is interactive. */
       touch-action: none;
     }
     canvas {
-      pointer-events: auto; /* 画布本身可点击/拖拽 */
+      pointer-events: auto; /* The canvas itself accepts clicks and dragging. */
       cursor: grab;
       image-rendering: pixelated;
     }

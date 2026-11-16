@@ -1,5 +1,5 @@
-// Electron preload：暴露最小安全 IPC 面给 renderer（contextBridge）。
-// renderer 只拿得到 whaleGirl.*，无 Node 全局——保持 contextIsolation 语义。
+// Electron preload exposes only the minimal whaleGirl IPC API through contextBridge.
+// The renderer has no Node globals, preserving context isolation.
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('whaleGirl', {
