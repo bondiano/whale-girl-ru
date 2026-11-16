@@ -114,7 +114,7 @@ export function parsePriorityList(file) {
   const order = []
   let inList = false
   for (const line of lines) {
-    if (line.startsWith('## 优先级')) { inList = true; continue }
+    if (/^## (?:优先级|Приоритеты)(?:\s|（|$)/u.test(line)) { inList = true; continue }
     if (inList) {
       if (line.startsWith('## ')) break
       if (PRIORITY_ROW_RE.test(line)) {

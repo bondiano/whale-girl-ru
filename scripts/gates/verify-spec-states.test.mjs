@@ -125,6 +125,11 @@ test('接受：优先级列表行序与 STATE_TABLE 一致', () => {
   assert.equal(ok, true, errors.join('\n'))
 })
 
+test('accepts a fully Russian priority heading while still checking the exact state order', () => {
+  const document = goodPriority().replace('## 优先级（STATE_TABLE 行序，文法单源）', '## Приоритеты (порядок строк STATE_TABLE)')
+  assert.equal(check(makeTree(goodSpec(), null, document)).ok, true)
+})
+
 test('拒绝：优先级列表行序 ≠ STATE_TABLE（文档与文法单源漂移）', () => {
   // Move idle first to produce a documented priority mismatch.
   const tableOrder = STATE_TABLE.map((r) => r.state)
