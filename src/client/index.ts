@@ -25,7 +25,11 @@ import { registerWhaleSettingsCard } from './settings-card.js'
 import { createMicrophoneCapture, createConversationResume, createSpeechRequest } from './microphone.js'
 import { planOverlay } from './overlay-placement.js'
 import { bindMenuKeyboard, currentSessionId, SESSION_STATUS_QUESTION } from './menu.js'
-import { presentChatReply } from './chat-reply.js'
+import { presentChatReply, replyWaitingPhase } from './chat-reply.js'
+import { playPcmResponse } from './pcm-playback.js'
+import { normalizeVoiceText } from '../core/voice.js'
+import { speechTone } from '../core/speech-text.js'
+import type { SpeechTone } from '../core/speech-text.js'
 
 const ASSETS_URL = ASSETS_PATH
 const MANIFEST_URL = `${ASSETS_URL}/manifest.json`
@@ -167,16 +171,10 @@ const CSS = `
 [data-whale-girl][data-whale-girl-inert] { opacity: .6; pointer-events: none; }
 [data-whale-girl] .pet-stage.pet-speaking { animation: whale-girl-m-speak .55s ease-in-out infinite; }
 @keyframes whale-girl-m-speak { 0%,100% { transform: translateY(0); } 45% { transform: translateY(-2px); } 70% { transform: translateY(0); } }
-[data-whale-girl] .pet-typing { display: inline-flex; align-items: center; gap: 3px; height: 12px; }
-[data-whale-girl] .pet-typing i { width: 4px; height: 4px; border-radius: 50%; background: #9FB4FF; animation: whale-girl-typing 1s ease-in-out infinite; }
-[data-whale-girl] .pet-typing i:nth-child(2) { animation-delay: .15s; }
-[data-whale-girl] .pet-typing i:nth-child(3) { animation-delay: .3s; }
-@keyframes whale-girl-typing { 0%,80%,100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
 [data-whale-girl][data-whale-girl-hidden] { display: none; }
 [data-whale-girl] .pet-stage:focus-visible { outline: 2px solid rgba(255,255,255,.6); outline-offset: 2px; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) {
   [data-whale-girl] .pet-stage { animation: none !important; }
-  [data-whale-girl] .pet-typing i { animation: none; opacity: .7; }
   [data-whale-girl] .pet-sprite { animation: none !important; }
   [data-whale-girl] .pet-heart { animation: none; opacity: 0; }
   [data-whale-girl] .pet-bubble { animation: none; }
@@ -539,6 +537,7 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   let chatOpen = false
   let chatGeneration = 0
   let chatPending = false
+  let textPending = false
   const composerVisible = () => chatOpen && chatEl !== null && chatEl.style.display !== 'none'
   let chatMic: HTMLButtonElement | null = null
   let listening = false
@@ -833,7 +832,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     if (transient !== null && now >= transientUntil) {
       resetTransient(now)
     }
-    const target = pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil })
+    const petThinking = replyWaitingPhase(textPending, speechPending, stage.classList.contains('pet-speaking')) !== null
+    const target = pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking || petThinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil })
     // Visual waking edge: show wake when the previous frame displayed sleep and the next leaves it,
     // unless dragging or another transient intervenes. Derived sleeping cannot trigger this:
     // sessions prioritize think/working while activity stays idle and sleeping stays true, so that
@@ -842,7 +842,7 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       transient = 'wake'
       transientUntil = now + WAKE_MS
       // Recompute after transient changes; wake outranks think/working/sleep/walk in STATE_TABLE.
-      setState(pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil }))
+      setState(pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking || petThinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil }))
       return
     }
     setState(target)
@@ -986,14 +986,33 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   // bubble exists at a time; each new reply replaces the previous one.
   const bubbleTimers = new Set<ReturnType<typeof setTimeout>>()
   let activeBubble: HTMLDivElement | null = null
+  let waitingAnimation: Animation | null = null
   const BUBBLE_TAIL_SIZE = 8
   const BUBBLE_MAX_WIDTH = 'min(280px, calc(100vw - 16px))'
   // Pet clearance: base 8 px plus input height while chat is open.
   const bubbleOffsetAbove = () => 8 + (composerVisible() ? (chatEl!.offsetHeight || 44) + 6 : 0)
   const clearBubble = () => {
+    waitingAnimation?.cancel()
+    waitingAnimation = null
     if (activeBubble !== null) {
       activeBubble.remove()
       activeBubble = null
+    }
+  }
+  const updateWaitingFeedback = () => {
+    const phase = replyWaitingPhase(textPending, speechPending, stage.classList.contains('pet-speaking'))
+    host.setAttribute('aria-busy', String(phase !== null))
+    waitingAnimation?.cancel()
+    waitingAnimation = null
+    const row = activeBubble?.querySelector<HTMLElement>('.pet-progress')
+    if (row === null || row === undefined) return
+    row.style.display = phase === null ? 'none' : 'flex'
+    if (phase === null) return
+    const icon = row.querySelector<HTMLElement>('.pet-progress-icon')!
+    icon.textContent = phase === 'thinking' ? '💭' : '🎙️'
+    row.querySelector<HTMLElement>('.pet-progress-label')!.textContent = phase === 'thinking' ? 'Думаю…' : 'Готовлю голос…'
+    if (!preferReducedMotion() && typeof icon.animate === 'function') {
+      waitingAnimation = icon.animate([{ opacity: .45, transform: 'translateY(0)' }, { opacity: 1, transform: 'translateY(-2px)' }, { opacity: .45, transform: 'translateY(0)' }], { duration: 1000, iterations: Infinity })
     }
   }
   const createBubble = (): Bubble => {
@@ -1008,14 +1027,26 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     textEl.className = 'pet-bubble-text'
     textEl.style.cssText = 'display:block; white-space:pre-wrap; overflow-wrap:anywhere;'
     scroll.appendChild(textEl)
+    const progress = document.createElement('div')
+    progress.className = 'pet-progress'
+    progress.setAttribute('role', 'status')
+    progress.setAttribute('aria-live', 'polite')
+    progress.style.cssText = 'display:none; align-items:center; gap:6px; color:#B7C8FE; font-size:11px; line-height:20px;'
+    const progressIcon = document.createElement('span')
+    progressIcon.className = 'pet-progress-icon'
+    progressIcon.setAttribute('aria-hidden', 'true')
+    const progressLabel = document.createElement('span')
+    progressLabel.className = 'pet-progress-label'
+    progress.append(progressIcon, progressLabel)
     const tail = document.createElement('div')
     tail.className = 'pet-bubble-tail'
     tail.setAttribute('aria-hidden', 'true')
     tail.style.cssText = `position:absolute; left:50%; width:0; height:0; transform:translateX(-50%);
       border-left:${BUBBLE_TAIL_SIZE}px solid transparent; border-right:${BUBBLE_TAIL_SIZE}px solid transparent;`
-    el.append(scroll, tail)
+    el.append(progress, scroll, tail)
     effects.appendChild(el)
     activeBubble = el
+    updateWaitingFeedback()
     return { el, scroll, textEl, tail, timer: null }
   }
   // The 30-second typing safety timer may remove a bubble during a pending request. Return a
@@ -1091,11 +1122,6 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   const showTypingBubble = () => {
     clearBubble()
     const bubble = createBubble()
-    const dots = document.createElement('span')
-    dots.className = 'pet-typing'
-    dots.setAttribute('aria-label', 'Кит-девочка печатает')
-    for (let i = 0; i < 3; i += 1) dots.appendChild(document.createElement('i'))
-    bubble.textEl.appendChild(dots)
     animateBubble(bubble.el, placeBubble(bubble))
     if (typeof onBubbleShown === 'function') onBubbleShown()
     armBubble(bubble, 30000) // Safety timeout: a stalled request must not leave typing dots forever.
@@ -1355,10 +1381,12 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
 
   const setSpeaking = (on: boolean) => {
     try { stage.classList.toggle('pet-speaking', on) } catch { /* The stage may have been removed. */ }
+    updateWaitingFeedback()
   }
 
   const closeChat = () => {
     chatOpen = false
+    textPending = false
     chatGeneration += 1
     cancelMicrophone()
     revealToken += 1 // Interrupt unfinished text reveal.
@@ -1391,7 +1419,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     releaseInteraction()
     stopWalk() // Stop movement before measuring the pet's position.
     positionChat()
-    clearBubble()
+    if (!textPending && !speechPending) clearBubble()
+    else if (activeBubble !== null) placeOverlay(activeBubble, { above: true, offsetY: bubbleOffsetAbove() })
     layoutStatus()
     if (!chatGreeted) {
       chatGreeted = true
@@ -1418,8 +1447,10 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     const text = chatInput.value.replace(/\s+/g, ' ').trim()
     if (text === '') return
     chatPending = true
+    textPending = true
     const generation = chatGeneration
     chatInput.value = ''
+    stopSpeaking()
     dismissChatInput()
     let typing = showTypingBubble()
     try {
@@ -1430,6 +1461,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       })
       const body = await res.json().catch(() => null)
       if (generation !== chatGeneration || !chatOpen) return
+      textPending = false
+      updateWaitingFeedback()
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
       const reply = typeof body?.reply === 'string' && body.reply !== '' ? body.reply : '…'
       const bubbleText = typeof body?.bubble === 'string' && body.bubble !== '' ? body.bubble : reply
@@ -1441,10 +1474,13 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       typing.textEl.textContent = reply
       reserveBubbleHeight(typing)
       placeBubble(typing)
-      const spoken = chatOpen && cfg.voice?.autoSpeakChat !== false && cfg.voice?.enabled === true
+      let spoken = false
       await presentChatReply({
         current: () => generation === chatGeneration && chatOpen && activeBubble === typing.el,
-        speak: () => { if (spoken) speak(speech) },
+        speak: () => {
+          if (chatOpen && cfg.voice?.autoSpeakChat !== false) spoken = speak(speech)
+          placeBubble(typing)
+        },
         reveal: () => revealText(typing, reply),
         finish: () => {
           armBubble(typing, chatBubbleMs(bubbleText))
@@ -1453,6 +1489,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       })
     } catch {
       if (generation !== chatGeneration || !chatOpen) return
+      textPending = false
+      updateWaitingFeedback()
       const message = 'Хм… не получилось поговорить. Попробуй ещё раз!'
       typing = ensureLiveBubble(typing)
       typing.textEl.textContent = message
@@ -1461,6 +1499,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       armBubble(typing, chatBubbleMs(message))
     } finally {
       chatPending = false
+      textPending = false
+      updateWaitingFeedback()
       finishChatWhenIdle()
       if (chatInput !== null && composerVisible() && generation === chatGeneration) {
         // Restore focus only if the user has not moved elsewhere. Receiving a reply must not steal
@@ -1511,14 +1551,15 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     return voices.find((voice) => typeof voice.lang === 'string' && voice.lang.toLowerCase().startsWith('ru')) ?? null
   }
 
-  const speakBrowser = (text: string) => {
+  const speakBrowser = (text: string, tone: SpeechTone): boolean => {
     const synth = window.speechSynthesis
-    if (synth === undefined || typeof SpeechSynthesisUtterance !== 'function') { speechPending = false; finishChatWhenIdle(); return }
+    if (synth === undefined || typeof SpeechSynthesisUtterance !== 'function') { speechPending = false; setSpeaking(false); finishChatWhenIdle(); return false }
     try {
       synth.cancel()
       const signal = speechRequest.start()
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = 'ru-RU'
+      utterance.pitch = tone === 'cheerful' ? 1.12 : tone === 'calm' ? .95 : 1
       utterance.rate = typeof cfg.voice?.rate === 'number' ? Math.min(2, Math.max(0.5, cfg.voice.rate)) : 1
       const voice = pickBrowserVoice()
       if (voice !== null) utterance.voice = voice
@@ -1526,21 +1567,32 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       utterance.onend = () => { if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); maybeConversationListen(); finishChatWhenIdle() } }
       utterance.onerror = () => { if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); finishChatWhenIdle() } }
       synth.speak(utterance)
-    } catch { speechPending = false; finishChatWhenIdle() }
+      return true
+    } catch { speechPending = false; setSpeaking(false); finishChatWhenIdle(); return false }
   }
 
-  const speakModel = async (text: string) => {
+  const speakModel = async (text: string, tone: SpeechTone) => {
     const signal = speechRequest.start()
     try {
       const res = await fetch(VOICE_PATH, {
         signal,
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text }),
+        headers: { 'content-type': 'application/json', accept: typeof AudioContext === 'function' ? 'audio/pcm' : 'audio/*' },
+        body: JSON.stringify({ text, tone }),
       })
       if (!res.ok) {
         const failure = await res.json().catch(() => null)
         throw new Error(typeof failure?.error === 'string' ? failure.error : `HTTP ${res.status}`)
+      }
+      if (res.headers.get('content-type')?.toLowerCase().startsWith('audio/pcm')) {
+        await playPcmResponse(res, { signal, onPlaying: () => { if (speechRequest.current(signal)) setSpeaking(true) } })
+        if (speechRequest.current(signal)) {
+          speechPending = false
+          setSpeaking(false)
+          maybeConversationListen()
+          finishChatWhenIdle()
+        }
+        return
       }
       const blob = await res.blob()
       if (!speechRequest.current(signal) || cfg.voice.enabled !== true) return
@@ -1563,18 +1615,20 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     }
   }
 
-  const speak = (text: unknown) => {
+  const speak = (text: unknown): boolean => {
     const voice = cfg.voice
-    if (voice?.enabled !== true || typeof text !== 'string') return
-    const clean = text.replace(/[«»"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 300)
-    if (clean === '') return
+    if (voice?.enabled !== true || typeof text !== 'string') return false
+    const clean = normalizeVoiceText(text)
+    if (clean === null) return false
+    const tone = speechTone(text)
     stopSpeaking()
     speechPending = true
+    updateWaitingFeedback()
     if (voice.provider !== 'browser') {
-      void speakModel(clean)
-      return
+      void speakModel(clean, tone)
+      return true
     }
-    speakBrowser(clean)
+    return speakBrowser(clean, tone)
   }
 
   const interact = async (action: 'feed' | 'play') => {

@@ -965,6 +965,11 @@ export function apply(ctx: HostContext, config: unknown) {
         kind: 'exact',
         path: VOICE_PATH,
         handler: async (req, res) => {
+          const abort = new AbortController()
+          let completed = false
+          const disconnected = () => { if (!completed) abort.abort() }
+          req.once?.('aborted', disconnected)
+          res.once?.('close', disconnected)
           try {
             if (req.method !== 'POST') {
               json(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
@@ -999,21 +1004,40 @@ export function apply(ctx: HostContext, config: unknown) {
               json(res, 400, { error: 'text required' })
               return
             }
-            const result = await synthesizeVoice({ voice: configRef.voice, text, env: process.env })
+            const stream = req.headers.accept?.split(',').some(value => value.trim().split(';')[0] === 'audio/pcm') === true
+            const onPcm = stream ? (chunk: Buffer) => {
+              if (abort.signal.aborted || res.destroyed || res.writableLength + chunk.length > 512 * 1024) throw new Error('voice stream unavailable')
+              if (!res.headersSent) res.writeHead(200, {
+                'content-type': 'audio/pcm;rate=24000;channels=1;encoding=s16le',
+                'cache-control': 'no-store',
+                'x-content-type-options': 'nosniff',
+              })
+              res.write(chunk)
+            } : undefined
+            const result = await synthesizeVoice({ voice: configRef.voice, text, tone: body.tone, env: process.env, signal: abort.signal, onPcm })
+            if (res.destroyed || abort.signal.aborted) return
             if (!result.ok) {
+              if (res.headersSent) { res.destroy(); return }
               const status = result.error === SUBSCRIPTION_VOICE_ERROR ? 409
                 : result.error.startsWith('voice-') ? 400 : 502
               json(res, status, { error: result.error, ...(result.status === undefined ? {} : { status: result.status }) })
               return
             }
+            if (res.headersSent) { res.end(); return }
             res.writeHead(200, {
               'content-type': result.contentType,
               'content-length': result.audio.length,
               'cache-control': 'no-store',
             })
             res.end(result.audio)
-          } catch (error) {
-            json(res, 502, { error: error instanceof Error ? error.message : String(error) })
+          } catch {
+            if (res.destroyed) return
+            if (res.headersSent) res.destroy()
+            else json(res, 502, { error: 'tts-failed' })
+          } finally {
+            completed = true
+            req.off?.('aborted', disconnected)
+            res.off?.('close', disconnected)
           }
         },
       }),

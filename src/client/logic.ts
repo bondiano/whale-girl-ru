@@ -345,6 +345,10 @@ export function voiceErrorMessage(code: string | null | undefined) {
       return 'Озвучка отменена.'
     case 'tts-connection-failed':
       return 'Не удалось подключиться к сервису голоса. Проверь интернет и адрес API в настройках.'
+    case 'tts-playback-blocked':
+      return 'Браузер заблокировал звук. Нажми на питомца и попробуй озвучить ответ ещё раз.'
+    case 'tts-incomplete':
+      return 'Поток голоса прервался. Проверь соединение и попробуй ещё раз.'
     case 'tts-invalid-audio':
     case 'tts-invalid-content-type':
       return 'Сервис голоса вернул некорректное аудио. Проверь адрес и модель в настройках.'

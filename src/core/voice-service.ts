@@ -41,7 +41,7 @@ export function pcmToWav(pcm: Uint8Array): Buffer {
   return Buffer.concat([header, pcm])
 }
 
-function realtimeSpeech(request: RealtimeVoiceRequest, socketFactory: VoiceSocketFactory, signal: AbortSignal): Promise<VoiceResult> {
+function realtimeSpeech(request: RealtimeVoiceRequest, socketFactory: VoiceSocketFactory, signal: AbortSignal, onPcm?: (chunk: Buffer) => void): Promise<VoiceResult> {
   return new Promise((resolve) => {
     let socket: VoiceSocket
     try {
@@ -55,6 +55,7 @@ function realtimeSpeech(request: RealtimeVoiceRequest, socketFactory: VoiceSocke
     let finished = false
     let configured = false
     let requested = false
+    let pendingByte: Buffer | null = null
     const finish = (result: VoiceResult) => {
       if (finished) return
       finished = true
@@ -107,6 +108,14 @@ function realtimeSpeech(request: RealtimeVoiceRequest, socketFactory: VoiceSocke
             return
           }
           chunks.push(chunk)
+          if (onPcm !== undefined) {
+            const samples = pendingByte === null ? chunk : Buffer.concat([pendingByte, chunk])
+            const aligned = samples.length - samples.length % 2
+            pendingByte = aligned === samples.length ? null : samples.subarray(aligned)
+            if (aligned > 0) {
+              try { onPcm(samples.subarray(0, aligned)) } catch { finish({ ok: false, error: 'tts-stream-failed' }) }
+            }
+          }
         } else if (value.type === 'response.done' && requested) {
           if (record(value.response).status !== 'completed') finish({ ok: false, error: 'tts-failed' })
           else if (size === 0) finish({ ok: false, error: 'tts-empty' })
@@ -155,13 +164,15 @@ async function readAudio(response: Response): Promise<VoiceResult> {
 }
 
 /** No subscription token probing, automatic API-key selection, retries or paid fallbacks. */
-export async function synthesizeVoice({ voice, text, env = process.env, fetchImpl = fetch, socketFactory = createNodeVoiceSocket, signal }: {
+export async function synthesizeVoice({ voice, text, tone, env = process.env, fetchImpl = fetch, socketFactory = createNodeVoiceSocket, signal, onPcm }: {
   voice: Partial<VoiceConfig> | null | undefined
   text: unknown
+  tone?: unknown
   env?: VoiceEnvironment
   fetchImpl?: typeof fetch
   socketFactory?: VoiceSocketFactory
   signal?: AbortSignal
+  onPcm?: (chunk: Buffer) => void
 }): Promise<VoiceResult> {
   const providerFailure = voiceProviderFailure(voice)
   if (providerFailure !== null) return providerFailure
@@ -171,10 +182,12 @@ export async function synthesizeVoice({ voice, text, env = process.env, fetchImp
   try {
     if (combined.aborted) return { ok: false, error: 'tts-aborted' }
     if (isRealtimeVoiceModel(voice?.model)) {
-      const request = buildRealtimeVoiceRequest({ voice, text, env })
-      return request.ok ? await realtimeSpeech(request, socketFactory, combined) : request
+      const options = { voice, text, tone, env }
+      const request = buildRealtimeVoiceRequest(options)
+      return request.ok ? await realtimeSpeech(request, socketFactory, combined, onPcm) : request
     }
-    const request = buildTtsRequest({ voice, text, env })
+    const options = { voice, text, tone, env }
+    const request = buildTtsRequest(options)
     if (!request.ok) return request
     const response = await fetchImpl(request.url, {
       method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: combined,

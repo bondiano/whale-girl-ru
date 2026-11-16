@@ -39,6 +39,56 @@ function socketHarness(onResponse) {
 
 const completed = { type: 'response.done', response: { status: 'completed' } }
 
+test('Realtime forwards validated PCM immediately, before response completion', async () => {
+  const order = []
+  const h = socketHarness((socket) => {
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([0, 1]).toString('base64') })
+    order.push('before-completion')
+    socket.emit(completed)
+  })
+  const result = await synthesizeVoice({ voice: realtime, text: 'Привет', socketFactory: h.socketFactory, onPcm: chunk => order.push([...chunk]) })
+  assert.deepEqual(order, [[0, 1], 'before-completion'])
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.audio.subarray(44), Buffer.from([0, 1]))
+})
+
+test('PCM streaming aligns split samples, rejects an odd final sample, and stops after cancellation', async () => {
+  const chunks = []
+  const aligned = socketHarness((socket) => {
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([0]).toString('base64') })
+    assert.equal(chunks.length, 0)
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([1, 2, 3]).toString('base64') })
+    socket.emit(completed)
+  })
+  assert.equal((await synthesizeVoice({ voice: realtime, text: 'Привет', socketFactory: aligned.socketFactory, onPcm: chunk => chunks.push(chunk) })).ok, true)
+  assert.deepEqual(Buffer.concat(chunks), Buffer.from([0, 1, 2, 3]))
+
+  const odd = socketHarness((socket) => {
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([0, 1, 2]).toString('base64') })
+    socket.emit(completed)
+  })
+  assert.deepEqual(await synthesizeVoice({ voice: realtime, text: 'Привет', socketFactory: odd.socketFactory, onPcm() {} }), { ok: false, error: 'tts-invalid-audio' })
+
+  const controller = new AbortController()
+  const cancelledChunks = []
+  const cancelled = socketHarness((socket) => {
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([0, 1]).toString('base64') })
+    controller.abort()
+    socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([2, 3]).toString('base64') })
+    socket.emit(completed)
+  })
+  assert.deepEqual(await synthesizeVoice({ voice: realtime, text: 'Привет', socketFactory: cancelled.socketFactory, signal: controller.signal, onPcm: chunk => cancelledChunks.push(chunk) }), { ok: false, error: 'tts-aborted' })
+  assert.deepEqual(Buffer.concat(cancelledChunks), Buffer.from([0, 1]))
+  assert.equal(cancelled.socket.closed, true)
+})
+
+test('PCM consumer failures terminate the Realtime socket instead of reporting partial success', async () => {
+  const h = socketHarness((socket) => socket.emit({ type: 'response.output_audio.delta', delta: Buffer.from([0, 1]).toString('base64') }))
+  const result = await synthesizeVoice({ voice: realtime, text: 'Привет', socketFactory: h.socketFactory, onPcm() { throw new Error('private consumer error') } })
+  assert.deepEqual(result, { ok: false, error: 'tts-stream-failed' })
+  assert.equal(h.socket.closed, true)
+})
+
 test('Realtime speech configures current model and voice, returns mono PCM24k WAV, closes socket', async () => {
   const pcm = Buffer.from([0, 0, 1, 0, 255, 127, 0, 128])
   const h = socketHarness((socket) => {

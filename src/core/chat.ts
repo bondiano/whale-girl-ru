@@ -4,6 +4,7 @@
 // normalizeChatText is the user-text boundary: collapse whitespace and cap CHAT_TEXT_MAX for the model and TTS.
 // normalizeReply produces a single plain-text line because speech bubbles do not render multiline Markdown.
 // personaFor combines the chosen persona with level, task, and title facts from the /state snapshot.
+import { cleanSpeechText } from './speech-text.js'
 
 export interface ModelSelection { provider: string; model: string }
 export interface ChatExtras { sessionContext?: string; headlines?: string[]; newsUnavailable?: boolean }
@@ -169,12 +170,7 @@ export function bubbleText(reply: unknown, max = 140) {
 
 /** Produce speech text from the same reply, removing emoji and guillemets. */
 export function speechText(reply: unknown) {
-  if (typeof reply !== 'string') return ''
-  return reply
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]|\u{FE0F}|\u{200D}/gu, ' ')
-    .replace(/[«»]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return cleanSpeechText(reply)
 }
 
 /** Fallback replies when the model or service is unavailable, so the pet still responds. */
