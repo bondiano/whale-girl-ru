@@ -41,7 +41,8 @@ function analyze(html) {
   if (!stageHasSprite) errors.push('宠物舞台为空（sprite 未渲染）')
   // motion 配方生效（idle 兜底态必为 pet-motion-bob）与账本渲染（任务计数）——回归防线。
   if (!/pet-motion-[a-z]+/.test(html)) errors.push('未找到 pet-motion-* 运动类（motion 配方未生效）')
-  if (!/<span class="pet-stats"[^>]*>\d+ 任务/.test(html)) errors.push('账本统计未渲染（任务计数缺失）')
+  // 状态条文案已本地化（俄语「Задач: N」）：断言跟当前渲染一致，不再等中文「任务」。
+  if (!/<span class="pet-stats"[^>]*>Задач:\s*\d+/.test(html)) errors.push('账本统计未渲染（任务计数缺失）')
   // transform 合法性：sprite 的 transform 必须是合法 scale 数值（曾因 scale(NaN) 整条被
   // 浏览器丢弃——尺寸变大 + flip 失效双回归，此处防线）。v5 起 transform 是
   // translate(-50%,-50%) scale(s) scaleX(flip) 组合——从 sprite 内联 style 提取首个 scale()。
@@ -100,3 +101,5 @@ if (last.errors.length > 0) {
   process.exit(1)
 }
 console.log('[verify-client-smoke] OK：client apply 成功，宠物以 sprite 渲染')
+// CDP WebSocket 不主动关闭会让进程挂住（成功路径以前一直不退出）：显式收尾。
+process.exit(0)

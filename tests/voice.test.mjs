@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  VOICE_TEXT_MAX, buildTtsRequest, normalizeTtsBaseUrl, normalizeVoiceText, resolveApiKey,
+  VOICE_TEXT_MAX, buildSttRequest, buildTtsRequest, normalizeSttUrl, normalizeTtsBaseUrl, normalizeVoiceText, resolveApiKey,
 } from '../lib/src/voice.mjs'
 
 test('normalizeVoiceText: схлопывает пробелы, обрезает, пустое → null', () => {
@@ -79,4 +79,40 @@ test('buildTtsRequest: ключ из env, кастомные модель/гол
   assert.equal(body.model, 'gpt-4o-mini-tts')
   assert.equal(body.voice, 'nova')
   assert.equal(body.response_format, 'wav')
+})
+
+test('normalizeSttUrl: /audio/speech заменяется на /audio/transcriptions, только http(s)', () => {
+  assert.equal(normalizeSttUrl('https://api.openai.com/v1'), 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(normalizeSttUrl('https://api.openai.com/v1/audio/speech'), 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(normalizeSttUrl('ftp://x'), null)
+  assert.equal(normalizeSttUrl(''), null)
+})
+
+test('buildSttRequest: FormData с file/model/language, без утечки ключа в поля', () => {
+  const audio = Buffer.from('fake')
+  const request = buildSttRequest({
+    voice: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-secret' },
+    audio,
+    mime: 'audio/webm',
+  })
+  assert.equal(request.ok, true)
+  assert.equal(request.url, 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(request.headers.authorization, 'Bearer sk-secret')
+  assert.ok(request.body instanceof FormData)
+  assert.equal(request.body.get('model'), 'whisper-1')
+  assert.equal(request.body.get('language'), 'ru')
+  assert.ok(request.body.get('file') instanceof Blob)
+})
+
+test('buildSttRequest: browser/пустое аудио/битый URL → ошибки', () => {
+  assert.equal(buildSttRequest({ voice: { provider: 'browser' }, audio: Buffer.from('x') }).error, 'voice-provider-browser')
+  assert.equal(buildSttRequest({ voice: { provider: 'openai', baseUrl: 'https://a/v1' }, audio: Buffer.alloc(0) }).error, 'voice-audio-empty')
+  assert.equal(buildSttRequest({ voice: { provider: 'openai', baseUrl: 'ftp://a' }, audio: Buffer.from('x') }).error, 'voice-base-url-invalid')
+})
+
+test('buildTtsRequest: instructions только для gpt-4o*-tts', () => {
+  const plain = buildTtsRequest({ voice: { provider: 'openai', baseUrl: 'https://a/v1', model: 'tts-1', instructions: 'мило' }, text: 'привет' })
+  assert.equal(JSON.parse(plain.body).instructions, undefined)
+  const expressive = buildTtsRequest({ voice: { provider: 'openai', baseUrl: 'https://a/v1', model: 'gpt-4o-mini-tts', instructions: 'мило' }, text: 'привет' })
+  assert.equal(JSON.parse(expressive.body).instructions, 'мило')
 })

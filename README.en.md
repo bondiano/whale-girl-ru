@@ -49,6 +49,21 @@ Update via `dsh plugin --profile web update whale-girl` (or switch the git ref),
 
 Full state machine (priorities / transitions / triggers): [docs/state-machine.md](docs/state-machine.md).
 
+## Chat & voice
+
+**💬 Talk** in the pet menu opens a small chat: type a line (Enter sends), the pet answers as a typewriter reveal and, with voice enabled, out loud. Answers come from a **DSH model**; the **Chat model** select in settings lists the host's providers/models (empty = the host default). The persona is built in (whale girl: Russian, lively, 2–4 sentences, one emoji) or your own system prompt.
+
+The pet knows the **active session**: how long the turn has been running, which tools were called, and a rough ETA from the median of past turns (`chat.sessionContext`, on by default). Asked "how's it going?" or "when will it finish?", it answers from those facts and invents nothing beyond them.
+
+Ask for **news** (`📰 News` in the menu or "what's new?") and the pet fetches fresh RSS/Atom headlines (`news.feeds`), retells 2–3 in its own words with links, and says so honestly when the feeds are unreachable.
+
+- Without the `llm` service/model the chat still answers with a fallback line.
+- History is the last `chat.historyTurns` turns in process memory (never written to disk) and resets when you change the model.
+- Only the pet's tenure, the active-session facts and (on request) news headlines are sent as context.
+- **🎙 Microphone**: tap to record, tap again to stop (30 s cap). The clip goes to `POST {voice.baseUrl}/audio/transcriptions` (`voice.sttModel`, default `whisper-1`), the transcript fills the input and is sent. Without MediaRecorder/mic permission it falls back to the browser's `SpeechRecognition` (`ru-RU`), then to an inline hint.
+- **🔁 Conversation mode** re-opens the mic after each spoken reply for a hands-free dialogue, Grok-bot style; stop it with 🔁, ✕, Esc or by closing the chat. While the pet speaks, the sprite bobs (`pet-speaking`).
+- `voice.autoSpeakChat` (on by default) speaks chat replies; `voice.conversation` stores the conversation-mode default.
+
 ## Desktop Companion (Optional)
 
 `desktop/` is a **standalone companion app** (Node engine + Tauri shell, zero runtime deps) that keeps the whale girl resident on your OS desktop. **Not installed via `dsh plugin`** — enable it yourself:
@@ -89,7 +104,7 @@ cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # fir
 
 ## Configuration
 
-**Plugins → Installed → whale-girl bundle page** (config card): the high-frequency subset — show on page, session memory, size, opacity, wandering, sleep delay, and the feed/play reply pools (one per line). **Session memory** (off by default) records completed-task milestones to a local file and greets you with last time's progress on resume/fork — local only, never model context, never uploaded; off stops all reads/writes (file kept). Changes **apply immediately, no restart** (a switch writes on click; numbers and reply pools write on blur or Enter).
+**Plugins → Installed → whale-girl bundle page** (config card): the high-frequency subset — show on page, session memory, size, opacity, wandering, sleep delay, the feed/play reply pools (one per line), voice (engine, speech-to-text model, URL, TTS model, voice, key env, rate), chat (enabled, **model**, persona) and news (enabled, headline count, feeds). The chat model list comes from the host (`GET /whale-girl/models`); if the catalogue is unavailable the card falls back to two `provider`/`model` text fields. **Session memory** (off by default) records completed-task milestones to a local file and greets you with last time's progress on resume/fork — local only, never model context, never uploaded; off stops all reads/writes (file kept). Changes **apply immediately, no restart** (a switch writes on click; numbers and reply pools write on blur or Enter).
 The card's first row is an **update row**: it checks the source once on mount (git installs by commit, registry installs by version) and shows the verdict plus the installed short commit; a newer revision turns the button into "Update to <target>…", and updating reinstalls through DSH's profile package manager without touching your settings. Full contract (endpoints, payloads, two-step reinstall, failure reasons, host version requirement): [docs/update-row.md](docs/update-row.md).
 
 The full option list lives in the plugin entry's `config` in the profile patch (`<dshHome>/profiles/<profile>/cordis.patch.yml`); a `whale-girl:` section in `<dshHome>/settings.yaml` is imported into that entry once:
@@ -103,6 +118,25 @@ whale-girl:
   walk:
     enabled: true    # wandering toggle
   sleepAfterMs: 60000
+  voice:
+    enabled: false
+    provider: browser        # browser | openai
+    sttModel: whisper-1      # speech-to-text model for the microphone
+    instructions: Говори как милая игривая девочка-кит  # only for gpt-4o*-tts
+    conversation: false      # conversation-mode default
+    autoSpeakChat: true      # speak chat replies
+  chat:
+    enabled: true
+    provider: ''             # empty = host model
+    model: ''
+    sessionContext: true     # active-session facts in context
+  news:
+    enabled: true
+    maxItems: 5
+    feeds:
+      - https://lenta.ru/rss/news
+      - https://habr.com/ru/rss/news/?fl=ru
+      - https://hnrss.org/frontpage
 ```
 
 Full option list and why the semantic layer (XP / titles) is sealed: `lib/src/config.mjs`. **Not configurable** (changing XP / title thresholds would break the accumulation ledger).

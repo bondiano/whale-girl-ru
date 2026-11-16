@@ -46,13 +46,17 @@ dsh plugin --profile web add whale-girl                        # npm 源（构�
 
 完整状态机（优先级/转换语义/触发源）见 [docs/state-machine.md](docs/state-machine.md)。
 
+## 对话与语音
+
+菜单 **💬 聊一聊** 打开对话：回答逐字显示，开语音时念出来；**对话模型**下拉框选择模型（留空 = 宿主默认）。宠物知道**当前会话**（回合时长、工具与剩余时间估算），只按事实回答；问新闻时抓取 RSS/Atom 并转述 2–3 条，抓不到就说明。**🎙** 录音 30 秒，识别后发送，失败退回 `SpeechRecognition`；**🔁** 回答后自动再开麦。
+
 ## 桌面伴侣（可选）
 
 `desktop/` 是**独立桌面伴侣应用**（Node 引擎 + Tauri 渲染壳，零运行时依赖），把鲸鱼娘渲染到操作系统桌面常驻。**不随 `dsh plugin` 安装**——想要桌宠的用户自行启用：
 
 ```sh
 # 前置：Node ≥18；桌面渲染壳需 Rust 工具链（cargo）
-npm install -g whale-girl-desktop   # npm 源安装（引擎 + Tauri 渲染壳源码随包分发）
+npm install -g whale-girl-desktop   # npm 源安装
 whale-girl-desktop --headless       # 无窗模式可用：presence 心跳 + 状态轮询 + SSE
 cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # 首次编译约 5-15 分钟；产物 target/release/whale-girl-desktop（约 12MB）
 ./target/release/whale-girl-desktop   # 启动透明置顶桌宠（默认连本机 DSH 3080）
@@ -60,8 +64,8 @@ cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # 首
 # 或从源码：cd desktop && npm install && cd src-tauri && cargo build --release
 ```
 
-- 消费 whale-girl 既有公开端点（`/state`、`/events`、`/presence`、`/interact`、`/config`、`/assets`），**不改动插件本体**；运行期间网页端宠物自动隐藏（presence 契约），退出或崩溃（TTL 45s 过期）后恢复。
-- 渲染壳：Tauri v2（推荐，体积 ~12MB）；Electron 遗留壳保留（`npm i -D electron` 后可用）。
+- 消费 whale-girl 既有公开端点（`/state`、`/events`、`/presence`、`/interact`、`/config`、`/assets`），**不改动插件本体**；运行期间网页端宠物自动隐藏（presence 契约），退出后恢复。
+- 渲染壳：Tauri v2（推荐）；Electron 遗留壳保留。
 - 设计与契约见 `desktop/DESIGN.md`、`desktop/BUILD-RUN.md`。
 
 ## 状态预览
@@ -86,7 +90,7 @@ cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # 首
 
 ## 配置
 
-**插件 → 已安装 → whale-girl 包页**（配置卡片）：高频子集——网页端显示、会话记忆、尺寸、透明度、游走、睡眠等待，以及投喂/玩耍回话文案池（每行一条）。**会话记忆**默认关闭：开启后宠物把任务完成等里程碑写进本机 `data/whale-girl/sessions.json`（几字节/条），会话恢复或分支（fork）时沿会话血缘读回、重逢时说一句上次完成了什么——只写本机文件，不进模型上下文、不上传网络；关闭即停止读写（文件保留，可自行删除）。**改动即时生效、免重启**（开关点击即写；数字与文案池失焦或回车即写）。
+**插件 → 已安装 → whale-girl 包页**（配置卡片）：高频子集——网页端显示、会话记忆、尺寸、透明度、游走、睡眠等待、投喂/玩耍回话文案池（每行一条）、语音（引擎、识别模型、地址、TTS 模型、音色、密钥变量、语速）、对话（开关、**模型**、人设）与新闻（开关、条数、订阅源）。对话模型列表来自宿主（`GET /whale-girl/models`）；目录不可用时卡片退回两个 `provider`/`model` 文本框。**会话记忆**默认关闭：开启后宠物把任务完成等里程碑写进本机 `data/whale-girl/sessions.json`（几字节/条），会话恢复或分支（fork）时沿会话血缘读回、重逢时说一句上次完成了什么——只写本机文件，不进模型上下文、不上传网络；关闭即停止读写（文件保留，可自行删除）。**改动即时生效、免重启**（开关点击即写；数字与文案池失焦或回车即写）。
 卡片首行是**更新行**：挂载时自动查一次上游（git 安装按提交、registry 安装按版本），状态行给出结论与当前短提交，有新版时按钮变成「更新到 <版本/提交>…」；更新经 DSH 的 profile 包管理服务重装，不碰你的设置。完整契约（端点、载荷、两步重装、失败原因、宿主版本要求）见 [docs/update-row.md](docs/update-row.md)。
 
 全量与高级项（如各窗口时长）在 profile patch 的条目 `config:`（`<dshHome>/profiles/<profile>/cordis.patch.yml`）；`<dshHome>/settings.yaml` 的 `whale-girl:` section 会被一次性导入该条目：
@@ -100,6 +104,25 @@ whale-girl:
   walk:
     enabled: true    # 游走开关
   sleepAfterMs: 60000
+  voice:
+    enabled: false
+    provider: browser        # browser | openai
+    sttModel: whisper-1      # 麦克风语音识别模型
+    instructions: Говори как милая игривая девочка-кит  # 仅 gpt-4o*-tts 使用
+    conversation: false      # 连续对话默认值
+    autoSpeakChat: true      # 自动朗读对话回答
+  chat:
+    enabled: true
+    provider: ''             # 留空 = 宿主模型
+    model: ''
+    sessionContext: true     # 把当前会话事实放进上下文
+  news:
+    enabled: true
+    maxItems: 5
+    feeds:
+      - https://lenta.ru/rss/news
+      - https://habr.com/ru/rss/news/?fl=ru
+      - https://hnrss.org/frontpage
 ```
 
 完整配置项清单与语义层（XP/称号）封闭说明见 `lib/src/config.mjs`。**语义层不可配**（改 XP/称号阈值会破坏积累账本一致性）。

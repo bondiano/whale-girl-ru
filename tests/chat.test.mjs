@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CHAT_HISTORY_MAX, CHAT_PERSONA, CHAT_REPLY_MAX, CHAT_TEXT_MAX,
-  appendHistory, buildChatMessages, fallbackReply, normalizeChatText, normalizeReply, personaFor,
+  appendHistory, bubbleText, buildChatMessages, fallbackReply, normalizeChatText, normalizeReply, personaFor, speechText,
 } from '../lib/src/chat.mjs'
 
 test('normalizeChatText: схлопывает пробелы, обрезает, пустое → null', () => {
@@ -98,4 +98,31 @@ test('CHAT_HISTORY_MAX: конфиг не может превысить жёст
     history = appendHistory(history, i % 2 === 0 ? 'user' : 'assistant', `t${i}`, 999)
   }
   assert.equal(history.length, CHAT_HISTORY_MAX)
+})
+
+test('bubbleText: одна строка, обрезка по концу предложения или по слову + …', () => {
+  assert.equal(bubbleText('Привет! Как дела?'), 'Привет! Как дела?')
+  const long = 'Первое предложение. Второе предложение. Третье предложение.'
+  assert.equal(bubbleText(long, 20), 'Первое предложение…')
+  assert.ok(bubbleText('слово '.repeat(40), 30).endsWith('…'))
+  assert.ok(bubbleText('слово '.repeat(40), 30).length <= 31)
+  assert.equal(bubbleText('', 10), '')
+  assert.equal(bubbleText(null, 10), '')
+})
+
+test('speechText: убирает эмодзи и «», сохраняя слова', () => {
+  assert.equal(speechText('Привет! 🐳 Я «кит» — и это классно 😊'), 'Привет! Я кит — и это классно')
+  assert.equal(speechText(''), '')
+  assert.equal(speechText(undefined), '')
+})
+
+test('personaFor: контекст сессии и новости попадают в факты с запретом выдумывать', () => {
+  const ctx = personaFor({}, '', { sessionContext: 'Активные сессии:\n- «x»: думает' })
+  assert.match(ctx, /Активные сессии/)
+  assert.match(ctx, /только по этим фактам/)
+  const news = personaFor({}, '', { headlines: ['Заголовок — https://a'] })
+  assert.match(news, /Свежие новости/)
+  assert.match(news, /2–3 новости/)
+  const down = personaFor({}, '', { newsUnavailable: true })
+  assert.match(down, /недоступны/)
 })

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Whale girl",
-    "description": "A desktop pet for the DSH web GUI (QQ-pet style): a companion in the bottom-right corner that you can drag, feed, play with and chat with; it answers through your DSH model, can speak (system voice or a TTS model), and completed tasks and sessions accrue into seniority, titles and memories. Russian-localized fork."
+    "description": "A pet in the DSH web interface (QQ-pet style): lives in the bottom-right corner, can be dragged, fed, played with and chatted to; answers with a chosen DSH model, speaks and listens through the microphone, knows about the active session and retells fresh news; tasks and sessions accumulate into tenure, titles and memories."
   }
 }

@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  CARD_FIELDS, deriveState, leafOf, parseLines, sameLeaf, serializeLines, writeField,
+  CARD_FIELDS, deriveState, leafOf, modelKey, parseLines, sameLeaf, serializeLines, splitModelKey, writeField, writeFields,
 } from '../lib/client/settings-fields.mjs'
 
 test('leafOf：按点分路径取值，缺失/非对象返回 undefined', () => {
@@ -163,9 +163,11 @@ test('文案池文本 ↔ 数组：trim、去空行、行尾空行不产生空�
 test('CARD_FIELDS：字段表完整性（路径唯一、种类合法、范围合理）', () => {
   const paths = CARD_FIELDS.map((f) => f.path)
   assert.equal(new Set(paths).size, paths.length, '路径必须唯一')
-  assert.equal(paths.length, 18, '字段数量与设置卡一致')
+  assert.equal(paths.length, 24, '字段数量与设置卡一致')
   for (const f of CARD_FIELDS) {
-    assert.ok(['toggle', 'number', 'lines', 'text', 'multiline'].includes(f.kind), `${f.path}: 种类合法`)
+    assert.ok(['toggle', 'number', 'lines', 'text', 'multiline', 'model', 'select'].includes(f.kind), `${f.path}: 种类合法`)
+    if (f.kind === 'select') assert.ok(Array.isArray(f.options) && f.options.length > 0, `${f.path}: селект с вариантами`)
+    if (f.kind === 'model') assert.equal(f.path, 'chat.route', 'model — виртуальный путь пары provider/model')
     assert.equal(typeof f.labelKey, 'string', `${f.path}: 有文案键`)
     if (f.kind === 'number') {
       assert.ok(Number.isFinite(f.min) && Number.isFinite(f.max), `${f.path}: 有范围`)
@@ -178,10 +180,50 @@ test('CARD_FIELDS：字段表完整性（路径唯一、种类合法、范围合
   // 三个开关 + 三个数字 + 两个文案池（与界面一致）
   assert.deepEqual(
     CARD_FIELDS.filter((f) => f.kind === 'toggle').map((f) => f.path),
-    ['enabled', 'sessionMemory', 'walk.enabled', 'voice.enabled', 'chat.enabled'],
+    ['enabled', 'sessionMemory', 'walk.enabled', 'voice.enabled', 'voice.conversation', 'chat.enabled', 'news.enabled'],
   )
   assert.deepEqual(
     CARD_FIELDS.filter((f) => f.kind === 'number').map((f) => f.path),
-    ['size', 'opacity', 'sleepAfterMs', 'voice.rate'],
+    ['size', 'opacity', 'sleepAfterMs', 'voice.rate', 'news.maxItems'],
   )
+})
+
+test('modelKey/splitModelKey: пара provider/model обратима, пустая = хост-дефолт', () => {
+  assert.equal(modelKey('openai', 'gpt-4o'), `openai\u0000gpt-4o`)
+  assert.deepEqual(splitModelKey(modelKey('openai', 'gpt-4o')), { provider: 'openai', model: 'gpt-4o' })
+  assert.equal(modelKey('', 'x'), '')
+  assert.equal(modelKey('x', ''), '')
+  assert.equal(splitModelKey(''), null)
+  assert.equal(splitModelKey('без-разделителя'), null)
+})
+
+test('deriveState: chat.route собирается из соседних листьев (и из default)', () => {
+  const state = deriveState({ status: 'ready', writable: true, value: { chat: { provider: 'openai', model: 'gpt-4o' } } }, { chat: {} })
+  assert.equal(state.fields['chat.route'], `openai\u0000gpt-4o`)
+  const fallback = deriveState({ status: 'ready', writable: true, value: {} }, { chat: { provider: 'p', model: 'm' } })
+  assert.equal(fallback.fields['chat.route'], `p\u0000m`)
+  const empty = deriveState({ status: 'ready', writable: true, value: {} }, {})
+  assert.equal(empty.fields['chat.route'], '')
+})
+
+test('writeFields: один mutate на несколько листов +回读 каждого', async () => {
+  const calls = []
+  const scope = makeScope({ chat: { provider: '', model: '' } })
+  const original = scope.mutate
+  scope.mutate = async (ops) => {
+    calls.push(ops)
+    return original(ops)
+  }
+  await writeFields(scope, [['chat.provider', 'openai'], ['chat.model', 'gpt-4o']])
+  assert.equal(calls.length, 1, 'одна транзакция')
+  assert.equal(calls[0].length, 2, 'две операции set')
+  assert.deepEqual(scope.getSnapshot().value.chat, { provider: 'openai', model: 'gpt-4o' })
+})
+
+test('writeFields: отказ хоста → ошибка с первым путём; пустой список — no-op', async () => {
+  const scope = makeScope({ chat: { provider: '', model: '' } })
+  scope.mutate = async () => false
+  await assert.rejects(() => writeFields(scope, [['chat.provider', 'p']]), /设置写入未被接受（chat\.provider）/)
+  await writeFields(scope, [])
+  await writeFields(scope, 'nope')
 })

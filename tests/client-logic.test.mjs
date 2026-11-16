@@ -2,7 +2,7 @@
 // v2：零负反馈——无 hunger/mood 属性状态；情绪只由事件瞬发 + 互动喜悦。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS } from '../lib/client/logic.mjs'
+import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS, shouldDimForDialogs, voiceErrorMessage } from '../lib/client/logic.mjs'
 
 const IDLE = { activity: { name: 'idle', until: 0 }, dragging: false, transient: null, sleeping: false, joyUntil: 0, now: 1000 }
 
@@ -409,4 +409,37 @@ test('pickPhrase: не повторяет предыдущую фразу под
 test('nextChatterAt: интервал в диапазоне CHATTER_MIN_MS..CHATTER_MAX_MS', () => {
   assert.equal(nextChatterAt({ now: 1000, random: () => 0 }), 1000 + CHATTER_MIN_MS)
   assert.equal(nextChatterAt({ now: 1000, random: () => 1 }), 1000 + CHATTER_MAX_MS)
+})
+
+test('shouldDimForDialogs: свой чат не гасит питомца, чужой видимый диалог — гасит', () => {
+  assert.equal(shouldDimForDialogs([]), false)
+  assert.equal(shouldDimForDialogs(null), false)
+  assert.equal(shouldDimForDialogs([{ ownedByPet: true, visible: true }]), false, 'панель беседы принадлежит питомцу')
+  assert.equal(shouldDimForDialogs([{ ownedByPet: false, visible: false }]), false, 'скрытый диалог не считается')
+  assert.equal(shouldDimForDialogs([{ ownedByPet: false, visible: true }]), true)
+  assert.equal(shouldDimForDialogs([
+    { ownedByPet: true, visible: true },
+    { ownedByPet: false, visible: false },
+    { ownedByPet: false, visible: true },
+  ]), true, 'хватает одного чужого видимого')
+  assert.equal(shouldDimForDialogs([null, { ownedByPet: false, visible: true }]), true, 'null пропускается')
+})
+
+test('voiceErrorMessage：коды распознавания → понятный русский текст', () => {
+  const codes = [
+    'voice-disabled', 'voice-provider-browser', 'voice-config-missing', 'voice-base-url-invalid',
+    'voice-audio-empty', 'stt-failed', 'not-allowed', 'service-not-allowed', 'no-speech',
+    'audio-capture', 'network', 'aborted',
+  ]
+  for (const code of codes) {
+    const message = voiceErrorMessage(code)
+    assert.equal(typeof message, 'string', `${code}: строка`)
+    assert.ok(message.length > 10, `${code}: не заглушка`)
+    assert.notEqual(message, voiceErrorMessage('unknown'), `${code}: не общий дефолт`)
+  }
+  // not-allowed и service-not-allowed — одна и та же проблема доступа к микрофону.
+  assert.equal(voiceErrorMessage('not-allowed'), voiceErrorMessage('service-not-allowed'))
+  assert.match(voiceErrorMessage('not-allowed'), /микрофон/i)
+  // Неизвестный/пустой код — общий совет, а не пустая строка.
+  for (const code of ['', null, undefined, 'что-то']) assert.equal(voiceErrorMessage(code), voiceErrorMessage('unknown'))
 })

@@ -1,5 +1,5 @@
 // 浮层定位单测（node:test，零依赖）。归属：lib/client/overlay-placement.mjs 的行为改动
-// 跑本文件（纵向翻面、横向越界平移、超宽回退、边界取大侧）。
+// 跑本文件（纵向переворот、横向越界平移、超宽回退、边界取大侧）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { planOverlay } from '../lib/client/overlay-placement.mjs'
@@ -122,4 +122,25 @@ test('自定义 margin 与 offsetY 生效', () => {
   })
   assert.equal(p.top, '-20px')
   assert.equal(p.left, 'calc(50% + 69px)') // 24 - 55 + 100
+})
+
+test('высокое облачко у верхней кромки:翻面 вниз, top остаётся относительной строкой', () => {
+  const rect = petAt(545, 20) // сверху свободно всего 4px
+  const size = { w: 200, h: 200 } // многострочный ответ: выше питомца не помещается
+  const p = planOverlay({ rect, viewport: { w: VW, h: VH }, size, above: true, offsetY: 8 })
+  assert.equal(p.up, false, 'высокое облачко у верха должно раскрыться вниз')
+  assert.equal(p.top, 'calc(100% + 8px)', 'top — относительная строка, не отрицательное число')
+  assert.ok(!p.top.startsWith('-'), 'никакого отрицательного top')
+  assert.equal(p.transform, 'translateX(-50%)')
+  assert.equal(p.left, '50%')
+  assertVertical(p, rect, size, 8)
+})
+
+test('высокое облачко у верхней кромки и请求 снизу: остаётся снизу', () => {
+  const rect = petAt(545, 20)
+  const size = { w: 200, h: 200 }
+  const p = planOverlay({ rect, viewport: { w: VW, h: VH }, size, above: false, offsetY: 8 })
+  assert.equal(p.up, false)
+  assert.equal(p.top, 'calc(100% + 8px)')
+  assertVertical(p, rect, size, 8)
 })

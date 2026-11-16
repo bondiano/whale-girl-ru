@@ -1,6 +1,6 @@
 {
   "name": "whale-girl",
-  "version": "0.3.1-ru.1",
+  "version": "0.4.0-ru.1",
   "type": "module",
   "description": "Домашний питомец в web-интерфейсе DSH (в духе QQ-питомца): живёт в правом нижнем углу, его можно тянуть, кормить и играть с ним; задачи, сессии и совместное время копятся в стаж, звания и воспоминания.",
   "main": "lib/index.mjs",
@@ -17,7 +17,8 @@
     "icon.png",
     "README.md",
     "README.en.md",
-    "README.zh.md"
+    "README.zh.md",
+    "lib/web-route-auth.mjs"
   ],
   "exports": {
     ".": "./lib/index.mjs",
@@ -51,5 +52,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bondiano/whale-girl-ru.git"
+  },
+  "homepage": "https://github.com/bondiano/whale-girl-ru#readme",
+  "bugs": {
+    "url": "https://github.com/bondiano/whale-girl-ru/issues"
   }
 }

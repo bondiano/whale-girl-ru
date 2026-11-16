@@ -12,6 +12,17 @@ test('NAMESPACE 与 DEFAULTS 完整性', () => {
   assert.equal(DEFAULTS.sessionMemory, false, '会话记忆默认关（opt-in）')
   assert.equal(DEFAULTS.walk.enabled, true)
   assert.equal(DEFAULTS.walk.maxWaitMs, 40000)
+  // Голос: STT рядом с TTS, разговорный режим и автоозвучка беседы — opt-in по факту.
+  assert.equal(DEFAULTS.voice.sttModel, 'whisper-1')
+  assert.equal(typeof DEFAULTS.voice.instructions, 'string')
+  assert.equal(DEFAULTS.voice.conversation, false)
+  assert.equal(DEFAULTS.voice.autoSpeakChat, true)
+  // Контекст активной сессии в беседе включён по умолчанию; новости — включены.
+  assert.equal(DEFAULTS.chat.sessionContext, true)
+  assert.equal(DEFAULTS.news.enabled, true)
+  assert.equal(DEFAULTS.news.maxItems, 5)
+  assert.equal(DEFAULTS.news.feeds.length, 3)
+  for (const feed of DEFAULTS.news.feeds) assert.match(feed, /^https?:\/\//)
 })
 
 test('buildSchema：条目 Config 用，解析出 volatile 实时引用', () => {
@@ -24,6 +35,11 @@ test('buildSchema：条目 Config 用，解析出 volatile 实时引用', () => 
   assert.equal(result.value.sessionMemory.get(), false, 'sessionMemory 是 volatile 叶')
   assert.equal(result.value.walk.enabled.get(), true)
   assert.deepEqual(result.value.replies.feed.get(), DEFAULTS.replies.feed)
+  assert.equal(result.value.voice.sttModel.get(), 'whisper-1')
+  assert.equal(result.value.voice.conversation.get(), false)
+  assert.equal(result.value.chat.sessionContext.get(), true)
+  assert.equal(result.value.news.maxItems.get(), 5)
+  assert.deepEqual(result.value.news.feeds.get(), DEFAULTS.news.feeds)
   // 未标 volatile 的容器保持普通对象（volatile 只落在叶上）。
   assert.equal(typeof result.value.walk.enabled, 'object')
 })

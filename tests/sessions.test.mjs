@@ -6,6 +6,7 @@ import {
   parseSessionEvent,
   createSessionView,
   applySessionView,
+  applySessionTiming,
   titleFromLog,
 } from '../lib/src/sessions.mjs'
 
@@ -80,4 +81,36 @@ test('titleFromLog 取最后一个非空标题', () => {
   assert.equal(titleFromLog([]), null)
   assert.equal(titleFromLog(null), null)
   assert.equal(titleFromLog([{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }]), null)
+})
+
+test('applySessionTiming: turn/start сбрасывает счётчики, tool/call копит, turn/end пишет длительность', () => {
+  let view = createSessionView('s1', 1000)
+  view = applySessionTiming(view, ev('turn/start', { turn: 1 }), 5000)
+  assert.equal(view.turnStartedAt, 5000)
+  assert.equal(view.toolCalls, 0)
+  view = applySessionTiming(view, ev('tool/call', { turn: 1, step: 1, callId: 'c', name: 'bash', arguments: '{}' }), 6000)
+  assert.equal(view.toolCalls, 1)
+  assert.equal(view.lastTool, 'bash')
+  view = applySessionTiming(view, ev('tool/call', { turn: 1, step: 2, callId: 'd', name: 'read', arguments: '{}' }), 7000)
+  assert.equal(view.toolCalls, 2)
+  assert.equal(view.lastTool, 'read')
+  view = applySessionTiming(view, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), 65000)
+  assert.deepEqual(view.recentTurnMs, [60000], 'длительность = конец − старт')
+  assert.equal(view.turnStartedAt, 0)
+})
+
+test('applySessionTiming: recentTurnMs хранит последние 5, отрицательное время не пишется', () => {
+  let view = { ...createSessionView('s1', 1), recentTurnMs: [1, 2, 3, 4, 5] }
+  view = applySessionTiming(view, ev('turn/start', { turn: 1 }), 10000)
+  view = applySessionTiming(view, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), 20000)
+  assert.deepEqual(view.recentTurnMs, [2, 3, 4, 5, 10000])
+  // turn/end без старта: нет длительности — объект не меняется
+  const bare = createSessionView('s2', 1)
+  assert.equal(applySessionTiming(bare, ev('turn/end', { turn: 1 }), 42), bare)
+  // старт позже конца (часы назад): отрицательное время зажимается в 0
+  const backwards = applySessionTiming({ ...createSessionView('s3', 1), turnStartedAt: 100 }, ev('turn/end', { turn: 1 }), 50)
+  assert.deepEqual(backwards.recentTurnMs, [0])
+  // события без таймингов возвращают тот же объект
+  const same = createSessionView('s3', 1)
+  assert.equal(applySessionTiming(same, ev('session/title', { title: 'x' }), 1), same)
 })

@@ -6,6 +6,8 @@
 // （需要部署里确实有新版可更新；按钮接线错位这类问题只有真点一下才暴露）。
 // 场景：memory-bubble——验证会话记忆回读气泡「/state 的 memory → 气泡文案 → 按 at 去重」链路
 // （拦 /state 响应注入 memory，不依赖真实任务/会话边沿，因此可重复跑）。
+// 场景：chat-inline——验证内联输入条 + 漫画气泡「打开聊天 → 宠物冻结 → 提交 → 多行气泡在视口内
+// → Esc 关闭 → 宠物恢复走动」链路（chat 请求用 window.fetch 桩替换，不依赖真实模型/环境）。
 // 此前同类验证是一次性 /tmp/cdp-*.mjs 探针（不入库、不可重跑）——本文件固化场景，
 // 断言失败非零退出，供 client 行为改动后重跑。
 // 依赖：本机 Chrome（CHROME_BIN 可覆盖）；Node ≥22（全局 WebSocket）。
@@ -321,7 +323,180 @@ async function memoryBubble({ call, log, on }) {
   return { hits }
 }
 
-const SCENARIOS = { 'sleep-drag-wake': sleepDragWake, 'update-row': updateRow, 'memory-bubble': memoryBubble }
+// ---- 场景：内联输入条 + 漫画气泡 + 聊天期间冻结 ----
+// 断言（全部在真实浏览器里）：
+// ① 打开聊天后输入条 [data-whale-girl-chat] 存在、矮（<120px）、在视口内；
+// ② 聊天打开时调 __whaleGirlTest.walkNow() 宠物不动、walking=false（冻结走路）；
+// ③ 提交后多行回复出现在 .pet-bubble：换行保留、white-space≠nowrap、气泡在视口内且在输入条上方；
+// ④ Esc 关闭后 walkNow() 能真的走起来（反向断言，防止「永远不走」也通过冻结测试）。
+// 测试缝 window.__whaleGirlTest 只在 ?whale-girl-test=1 时由 client 暴露（见 index.mjs）。
+async function chatInline({ call, log }) {
+  const evaluate = async (expression) => {
+    const r = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+    if (r?.exceptionDetails) throw new Error(`页面脚本抛错：${r.exceptionDetails.text ?? 'unknown'}`)
+    return r?.result?.value
+  }
+  const readJson = async (expression) => JSON.parse(await evaluate(expression))
+
+  // Токен доступа web-сервера одноразовый: первый заход его съедает и чистит URL, поэтому
+  // тестовый флаг кладём в sessionStorage и перезагружаемся (переживает reload того же таба).
+  await call('Page.navigate', { url: URL })
+  await sleep(1500)
+  await evaluate(`(() => { sessionStorage.setItem('whale-girl-test', '1'); return 'ok' })()`)
+  await call('Page.reload', { ignoreCache: true })
+  await sleep(1500)
+  // 首启弹窗会把宠物藏起来（syncInert）：去掉它再等挂载恢复。
+  const clearOnboarding = `(() => {
+    const t = document.getElementById('deepseek-onboarding-title')
+    if (t) t.remove()
+    const labelled = document.querySelector('[aria-labelledby="deepseek-onboarding-title"]')
+    if (labelled) labelled.remove()
+    return 'ok'
+  })()`
+  await evaluate(clearOnboarding)
+  const until = Date.now() + 20000
+  for (;;) {
+    const ready = await evaluate(`(() => {
+      const host = document.querySelector('[data-whale-girl]')
+      if (host === null) return 'no-host'
+      if (typeof window.__whaleGirlTest === 'undefined') return 'no-hook'
+      const sprite = document.querySelector('[data-whale-girl] .pet-sprite')
+      return sprite !== null && getComputedStyle(host).display !== 'none' ? 'ready' : 'not-ready'
+    })()`)
+    if (ready === 'ready') break
+    if (Date.now() > until) throw new Error(`等待宠物挂载超时（最后 ${ready}）`)
+    await sleep(300)
+  }
+  await sleep(800)
+  await evaluate(clearOnboarding)
+
+  // 打开聊天：Enter 打开菜单 → 点「💬 Поговорить」。
+  const opened = await evaluate(`(() => {
+    const stage = document.querySelector('[data-whale-girl] .pet-stage')
+    stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    const button = [...document.querySelectorAll('[data-whale-girl] .pet-menu button')]
+      .find((node) => (node.textContent || '').includes('Поговорить'))
+    if (button === undefined) return 'no-chat-button'
+    button.click()
+    return 'ok'
+  })()`)
+  if (opened !== 'ok') throw new Error(`没能打开聊天（${opened}）`)
+  await sleep(300)
+  const composer = await readJson(`(() => {
+    const el = document.querySelector('[data-whale-girl-chat]')
+    if (el === null) return JSON.stringify({ ok: false })
+    const rect = el.getBoundingClientRect()
+    return JSON.stringify({
+      ok: true, height: rect.height, left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      display: getComputedStyle(el).display,
+    })
+  })()`)
+  if (!composer.ok) throw new Error('聊天打开后没有 [data-whale-girl-chat]')
+  if (composer.height >= 120) throw new Error(`输入条太高（${Math.round(composer.height)}px）：疑似还留着旧面板`)
+  // 断言边界取真实视口：headless 的 innerHeight 不等于 --window-size 的高度。
+  const viewport = await readJson('JSON.stringify({ w: window.innerWidth, h: window.innerHeight })')
+  const vw = viewport.w
+  const vh = viewport.h
+  if (composer.left < 0 || composer.top < 0 || composer.right > vw || composer.bottom > vh) {
+    throw new Error(`输入条跑出视口：${JSON.stringify(composer)}`)
+  }
+  log('chat-open', `输入条 ${Math.round(composer.height)}px @ ${Math.round(composer.left)},${Math.round(composer.top)}`)
+
+  // 冻结：聊天打开时强制一次真实 wander —— 宠物不得移动，walking 必须回到 false。
+  const p0 = await readJson('JSON.stringify(window.__whaleGirlTest.position())')
+  await evaluate('window.__whaleGirlTest.walkNow()')
+  await sleep(800)
+  const p1 = await readJson('JSON.stringify(window.__whaleGirlTest.position())')
+  const walking = await evaluate('window.__whaleGirlTest.isWalking()')
+  if (p0.left !== p1.left || p0.top !== p1.top) {
+    throw new Error(`聊天打开时宠物移动了：${JSON.stringify(p0)} → ${JSON.stringify(p1)}`)
+  }
+  if (walking !== false) throw new Error('聊天打开时 walking 仍是 true（没有 stopWalk）')
+  log('chat-frozen', `聊天期间 walkNow() 后位置不变 ${JSON.stringify(p1)}，walking=false`)
+
+  // 提交：桩掉 /whale-girl/chat，让多行回复立刻到达（不依赖模型/网络）。
+  const submitted = await evaluate(`(() => {
+    window.__wgChatCalls = []
+    const real = window.fetch
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : String(input?.url ?? '')
+      if (url.includes('/whale-girl/chat')) {
+        window.__wgChatCalls.push(typeof init?.body === 'string' ? init.body : '')
+        return Promise.resolve(new Response(JSON.stringify({
+          reply: 'Первая строка ответа.\\nВторая строка ответа.',
+          bubble: 'Первая строка ответа.\\nВторая строка ответа.',
+        }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      }
+      return real(input, init)
+    }
+    const form = document.querySelector('[data-whale-girl-chat]')
+    const input = form.querySelector('input')
+    input.value = 'проверка чата'
+    form.requestSubmit()
+    return 'ok'
+  })()`)
+  if (submitted !== 'ok') throw new Error('没能提交聊天表单')
+
+  const bubbleUntil = Date.now() + 15000
+  let bubble = null
+  for (;;) {
+    bubble = await readJson(`(() => {
+      const el = document.querySelector('[data-whale-girl] .pet-bubble')
+      if (el === null) return JSON.stringify({ ok: false })
+      const text = el.querySelector('.pet-bubble-text')
+      const rect = el.getBoundingClientRect()
+      return JSON.stringify({
+        ok: true,
+        text: text === null ? el.textContent : text.textContent,
+        whiteSpace: getComputedStyle(el).whiteSpace,
+        left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+      })
+    })()`)
+    if (bubble.ok && bubble.text.includes('Вторая строка')) break
+    if (Date.now() > bubbleUntil) throw new Error(`等待多行回复气泡超时（最后 ${JSON.stringify(bubble)}）`)
+    await sleep(250)
+  }
+  if (!bubble.text.includes('\n')) throw new Error('气泡里换行丢了（white-space/рендер）')
+  if (bubble.whiteSpace === 'nowrap') throw new Error('气泡仍是 white-space: nowrap')
+  if (bubble.left < 0 || bubble.top < 0 || bubble.right > vw || bubble.bottom > vh) {
+    throw new Error(`气泡跑出视口：${JSON.stringify(bubble)}`)
+  }
+  const calls = await readJson('JSON.stringify(window.__wgChatCalls)')
+  if (calls.length !== 1) throw new Error(`/whale-girl/chat 调用 ${calls.length} 次（期望 1）`)
+  const chatRect = await readJson(`(() => {
+    const rect = document.querySelector('[data-whale-girl-chat]').getBoundingClientRect()
+    return JSON.stringify({ top: rect.top })
+  })()`)
+  if (bubble.bottom > chatRect.top + 1) {
+    throw new Error(`气泡压住输入条：气泡底 ${Math.round(bubble.bottom)} > 输入条顶 ${Math.round(chatRect.top)}`)
+  }
+  log('chat-bubble', `多行气泡 ${Math.round(bubble.right - bubble.left)}×${Math.round(bubble.bottom - bubble.top)} white-space=${bubble.whiteSpace}`)
+
+  // Esc 关闭 → 反向断言：宠物必须能重新走起来（防止「永远不走」也通过冻结断言）。
+  await evaluate(`(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    return 'ok'
+  })()`)
+  await sleep(300)
+  const closed = await evaluate(`document.querySelector('[data-whale-girl-chat]') === null
+    ? 'removed'
+    : (getComputedStyle(document.querySelector('[data-whale-girl-chat]')).display === 'none' ? 'hidden' : 'visible')`)
+  if (closed === 'visible') throw new Error('Esc 没有关闭聊天输入条')
+
+  const p2 = await readJson('JSON.stringify(window.__whaleGirlTest.position())')
+  let resumed = false
+  for (let attempt = 0; attempt < 6 && !resumed; attempt += 1) {
+    await evaluate('window.__whaleGirlTest.walkNow()')
+    await sleep(700)
+    const p3 = await readJson('JSON.stringify(window.__whaleGirlTest.position())')
+    resumed = p3.left !== p2.left || p3.top !== p2.top
+  }
+  if (!resumed) throw new Error('关闭聊天后宠物仍不走路（walkNow 没有移动）')
+  log('chat-resume', 'Esc 关闭后 walkNow() 让宠物重新移动')
+  return { composerHeight: Math.round(composer.height), bubbleWhiteSpace: bubble.whiteSpace, calls: calls.length, resumed }
+}
+
+const SCENARIOS = { 'sleep-drag-wake': sleepDragWake, 'update-row': updateRow, 'memory-bubble': memoryBubble, 'chat-inline': chatInline }
 
 async function main() {
   const scenario = SCENARIOS[SCENARIO]

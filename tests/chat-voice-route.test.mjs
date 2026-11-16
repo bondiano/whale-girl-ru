@@ -24,9 +24,15 @@ async function boot({ llm = undefined, defaultModel = { currentSelection: () => 
     llm,
     agentDefaultModel: defaultModel,
   }
+  const handlers = new Map()
   const ctx = {
     effect: (fn) => { fn(); return () => {} },
-    on: () => () => {},
+    on: (name, fn) => {
+      const list = handlers.get(name) ?? []
+      list.push(fn)
+      handlers.set(name, list)
+      return () => {}
+    },
     provide: () => {},
     get: (name) => services[name],
     agents: { list: () => [] },
@@ -62,7 +68,10 @@ async function boot({ llm = undefined, defaultModel = { currentSelection: () => 
       })
     })
   }
-  return { call, module }
+  const emit = (name, ...args) => {
+    for (const fn of handlers.get(name) ?? []) fn(...args)
+  }
+  return { call, module, emit }
 }
 
 const json = (res) => JSON.parse(typeof res.body === 'string' ? res.body : String(res.body))
@@ -229,4 +238,135 @@ test('POST /voice: ошибка TTS-сервера → 502 без бинарно
   const res = await call(module.VOICE_PATH, 'POST', JSON.stringify({ text: 'x' }), { 'sec-fetch-site': 'same-origin' })
   assert.equal(res.status, 502)
   assert.equal(json(res).error, 'tts-failed')
+})
+
+// ---- выбор модели (GET /models) ----
+
+test('GET /models: провайдеры/модели llm, сбой одного провайдера пропускается и кэшируется', async () => {
+  let calls = 0
+  const llm = {
+    listProviders: () => [{ id: 'p1', name: 'Первый' }, { id: 'p2', name: 'Второй' }],
+    listModels: async (provider) => {
+      calls += 1
+      if (provider === 'p2') throw new Error('offline')
+      return [{ id: 'm1', name: 'Модель 1' }]
+    },
+  }
+  const { call, module } = await boot({ llm })
+  const res = await call(module.MODELS_PATH, 'GET')
+  assert.equal(res.status, 200)
+  const body = json(res)
+  assert.deepEqual(body.current, { provider: 'mock-provider', model: 'mock-model' })
+  assert.deepEqual(body.hostDefault, { provider: 'mock-provider', model: 'mock-model' })
+  assert.deepEqual(body.options, [{ provider: 'p1', model: 'm1', label: 'Первый / Модель 1' }])
+  const again = await call(module.MODELS_PATH, 'GET')
+  assert.equal(json(again).options.length, 1)
+  assert.equal(calls, 2, 'второй GET — из кэша (по одному вызову на провайдера)')
+})
+
+test('GET /models: нет llm-каталога → 200 с пустым options (не 500)', async () => {
+  const { call, module } = await boot({ llm: fakeLlm() })
+  const res = await call(module.MODELS_PATH, 'GET')
+  assert.equal(res.status, 200)
+  assert.deepEqual(json(res).options, [])
+  const wrongMethod = await call(module.MODELS_PATH, 'POST', '{}')
+  assert.equal(wrongMethod.status, 405)
+})
+
+// ---- распознавание речи (POST /transcribe) ----
+
+const sttConfig = {
+  voice: {
+    enabled: true, provider: 'openai', baseUrl: 'https://api.openai.com/v1',
+    apiKey: 'sk-secret', sttModel: 'whisper-1',
+  },
+}
+
+test('POST /transcribe: сырое аудио → multipart на /audio/transcriptions, ключ не утекает в ответ', async () => {
+  let seen = null
+  const fetchImpl = async (url, options) => {
+    seen = { url, options }
+    return { ok: true, json: async () => ({ text: '  привет, кит  ' }) }
+  }
+  const { call, module } = await boot({ config: sttConfig, fetchImpl })
+  const res = await call(module.TRANSCRIBE_PATH, 'POST', Buffer.from('audio-bytes'), { 'content-type': 'audio/webm;codecs=opus' })
+  assert.equal(res.status, 200)
+  assert.deepEqual(json(res), { text: 'привет, кит' })
+  assert.equal(seen.url, 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(seen.options.headers.authorization, 'Bearer sk-secret')
+  assert.ok(seen.options.body instanceof FormData)
+  assert.equal(seen.options.body.get('model'), 'whisper-1')
+  assert.equal(seen.options.body.get('language'), 'ru')
+  assert.ok(!JSON.stringify(json(res)).includes('sk-secret'), 'ключ не возвращается')
+})
+
+test('POST /transcribe: 415 не-audio, 413 больше 5 МБ, 403 cross-origin', async () => {
+  const { call, module } = await boot({ config: sttConfig, fetchImpl: async () => ({ ok: true, json: async () => ({ text: 'x' }) }) })
+  const wrongType = await call(module.TRANSCRIBE_PATH, 'POST', Buffer.from('{}'), { 'content-type': 'application/json' })
+  assert.equal(wrongType.status, 415)
+  const huge = await call(module.TRANSCRIBE_PATH, 'POST', Buffer.alloc(5 * 1024 * 1024 + 1), { 'content-type': 'audio/webm' })
+  assert.equal(huge.status, 413)
+  const cross = await call(module.TRANSCRIBE_PATH, 'POST', Buffer.from('x'), { 'content-type': 'audio/webm', 'sec-fetch-site': 'cross-site' })
+  assert.equal(cross.status, 403)
+})
+
+test('POST /transcribe: голос выключен → 403; провайдер browser → 400', async () => {
+  const off = await boot({ config: { voice: { enabled: false } } })
+  const disabled = await off.call(off.module.TRANSCRIBE_PATH, 'POST', Buffer.from('x'), { 'content-type': 'audio/webm' })
+  assert.equal(disabled.status, 403)
+  const browser = await boot({ config: { voice: { enabled: true, provider: 'browser' } } })
+  const res = await browser.call(browser.module.TRANSCRIBE_PATH, 'POST', Buffer.from('x'), { 'content-type': 'audio/webm' })
+  assert.equal(res.status, 400)
+  assert.equal(json(res).error, 'voice-provider-browser')
+})
+
+// ---- контекст сессии и новости в /chat ----
+
+test('POST /chat: после turn/start в system попадает блок активной сессии', async () => {
+  let seen = null
+  const { call, module, emit } = await boot({ llm: fakeLlm({ onRequest: (options) => { seen = options } }) })
+  emit('session/event', { id: 's1', header: { createdAt: Date.now() - 120000 } }, { type: 'turn/start', data: { turn: 1 } })
+  emit('session/event', { id: 's1' }, { type: 'tool/call', data: { turn: 1, step: 1, callId: 'c', name: 'bash', arguments: '{}' } })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'как дела?' }), { 'sec-fetch-site': 'same-origin' })
+  assert.equal(res.status, 200)
+  assert.match(seen.system, /Активные сессии:/)
+  assert.match(seen.system, /инструментов: 1 \(последний: bash\)/)
+  assert.match(seen.system, /только по этим фактам/)
+})
+
+test('POST /chat: sessionContext=false — блок сессии не добавляется', async () => {
+  let seen = null
+  const { call, module, emit } = await boot({ llm: fakeLlm({ onRequest: (options) => { seen = options } }), config: { chat: { enabled: true, sessionContext: false } } })
+  emit('session/event', { id: 's1', header: { createdAt: Date.now() } }, { type: 'turn/start', data: { turn: 1 } })
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'привет' }), { 'sec-fetch-site': 'same-origin' })
+  assert.doesNotMatch(seen.system, /Активные сессии:/)
+})
+
+test('POST /chat: новостной запрос кладёт заголовки в system; ответ несёт bubble/speech', async () => {
+  let seen = null
+  const rss = '<rss><item><title>Свежая новость</title><link>https://n/1</link><pubDate>Mon, 16 Nov 2026 10:00:00 GMT</pubDate></item></rss>'
+  const fetchImpl = async () => ({ ok: true, headers: { get: () => null }, text: async () => rss })
+  const { call, module } = await boot({ llm: fakeLlm({ onRequest: (options) => { seen = options } }), fetchImpl })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'расскажи свежие новости' }), { 'sec-fetch-site': 'same-origin' })
+  assert.equal(res.status, 200)
+  assert.match(seen.system, /Свежие новости:/)
+  assert.match(seen.system, /Свежая новость — https:\/\/n\/1/)
+  assert.match(seen.system, /ничего не выдумывай/)
+  const body = json(res)
+  assert.equal(typeof body.bubble, 'string')
+  assert.equal(typeof body.speech, 'string')
+  assert.ok(!body.speech.includes('🐳'))
+})
+
+test('POST /chat: новости недоступны — в system честная пометка, ответ не падает', async () => {
+  let seen = null
+  const { call, module } = await boot({
+    llm: fakeLlm({ onRequest: (options) => { seen = options } }),
+    fetchImpl: async () => { throw new Error('offline') },
+    // Уникальные ленты: иначе кэш предыдущего теста отдаст заголовки и «недоступности» не будет.
+    config: { news: { enabled: true, feeds: ['https://offline.example/feed'], maxItems: 2 } },
+  })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'что нового?' }), { 'sec-fetch-site': 'same-origin' })
+  assert.equal(res.status, 200)
+  assert.match(seen.system, /недоступны/)
 })
