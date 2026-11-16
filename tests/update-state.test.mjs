@@ -1,10 +1,10 @@
-// 更新行呈现状态单测（node:test，零依赖）。归属：lib/client/update-state.mjs 的行为改动跑本文件
-// （各状态的状态文案、按钮文案/可用性/主次/点击处理函数、提示色，以及 POST 结果到界面状态的映射）。
+// Update-row presentation regressions cover status/action labels, availability,
+// primary/secondary styling, click handlers, notice tone, and POST-result mapping.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ROW_INITIAL, deriveUpdateRow, outcomeOf, reduceRow } from '../lib/client/update-state.mjs'
+import { ROW_INITIAL, deriveUpdateRow, outcomeOf, reduceRow } from '../dist/client/update-state.js'
 
-// 与宿主 locale 的 t 一致：支持 {name} 占位符插值。
+// Use the host locale interpolation contract for {name} placeholders.
 const dict = {
   checking: '检查中…', check: '检查更新…', latest: '已是最新', latestAt: '已是最新（当前 {current}）',
   available: '有新版本 {target}', availableAt: '有新版本 {target}（当前 {current}）',

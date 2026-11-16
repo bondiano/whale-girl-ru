@@ -1,11 +1,11 @@
-// client/character.mjs 单测（node:test）。归属：角色清单解析改动跑本文件。
-// v5：删 emoji 降级——stateOf 缺状态返回 undefined（调用方占位），isKnownState 基于 STATE_NAMES。
+// Character manifest regression tests. Missing artwork returns undefined
+// for a placeholder; valid names come from STATE_NAMES, without emoji fallback.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_ROLE_ID, ROLE_ID_RE, parseCharacters, listCharacters, defaultCharacter,
   getCharacter, stateOf, isKnownState,
-} from '../lib/client/character.mjs'
+} from '../dist/client/character.js'
 
 const OLD_MANIFEST = {
   states: { idle: { sheet: 'idle.png', frames: 3, fps: 2, loop: true } },
@@ -54,7 +54,7 @@ test('listCharacters / defaultCharacter / getCharacter', () => {
 test('stateOf：缺状态返回 undefined（调用方占位，不再 emoji 降级）', () => {
   const cat = getCharacter(NEW_MANIFEST, 'cat')
   assert.ok(stateOf(cat, 'walk'))
-  assert.equal(stateOf(cat, 'idle'), undefined) // cat 只有 walk
+  assert.equal(stateOf(cat, 'idle'), undefined) // The cat character provides only walk.
   assert.equal(stateOf(null, 'walk'), undefined)
 })
 

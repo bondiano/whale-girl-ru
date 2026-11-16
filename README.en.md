@@ -51,18 +51,15 @@ Full state machine (priorities / transitions / triggers): [docs/state-machine.md
 
 ## Chat & voice
 
-**💬 Talk** in the pet menu opens a small chat: type a line (Enter sends), the pet answers as a typewriter reveal and, with voice enabled, out loud. Answers come from a **DSH model**; the **Chat model** select in settings lists the host's providers/models (empty = the host default). The persona is built in (whale girl: Russian, lively, 2–4 sentences, one emoji) or your own system prompt.
+**⚙️ Settings** opens the pet’s plugin configuration. **💬 Talk** in the pet menu opens a small chat: type a line (Enter sends), the pet answers as a typewriter reveal and, with voice enabled, out loud. Answers come from a **DSH model**; the **Chat model** select in settings lists the host's providers/models (empty = the host default). The persona is built in (whale girl: Russian, lively, 2–4 sentences, one emoji) or your own system prompt.
 
-The pet knows the **active session**: how long the turn has been running, which tools were called, and a rough ETA from the median of past turns (`chat.sessionContext`, on by default). Asked "how's it going?" or "when will it finish?", it answers from those facts and invents nothing beyond them.
+**«Как дела?»** in the menu asks about the session currently selected in DSH. With `chat.sessionContext=true`, context includes its activity and at most six visible user/assistant messages (400 characters each); tool output, reasoning and system prompts are excluded. Pet chat history is isolated by model and session and stays in process memory. Missing session data is reported honestly. News requests still fetch RSS/Atom headlines on demand.
 
-Ask for **news** (`📰 News` in the menu or "what's new?") and the pet fetches fresh RSS/Atom headlines (`news.feeds`), retells 2–3 in its own words with links, and says so honestly when the feeds are unreachable.
+Voice is disabled initially. `browser` uses system speech and browser recognition (`ru-RU`). `openai` explicitly selects the **separately billed OpenAI API**: `gpt-transcribe` for recognition, Realtime `gpt-realtime-2.1-mini` with `marin` for speech. Credentials stay on the server (`WHALE_GIRL_TTS_API_KEY` or `voice.apiKey`). Explicit speech-compatible model settings retain `/audio/speech`. Provider and microphone failures are visible, with no automatic provider substitution.
 
-- Without the `llm` service/model the chat still answers with a fallback line.
-- History is the last `chat.historyTurns` turns in process memory (never written to disk) and resets when you change the model.
-- Only the pet's tenure, the active-session facts and (on request) news headlines are sent as context.
-- **🎙 Microphone**: tap to record, tap again to stop (30 s cap). The clip goes to `POST {voice.baseUrl}/audio/transcriptions` (`voice.sttModel`, default `whisper-1`), the transcript fills the input and is sent. Without MediaRecorder/mic permission it falls back to the browser's `SpeechRecognition` (`ru-RU`), then to an inline hint.
-- **🔁 Conversation mode** re-opens the mic after each spoken reply for a hands-free dialogue, Grok-bot style; stop it with 🔁, ✕, Esc or by closing the chat. While the pet speaks, the sprite bobs (`pet-speaking`).
-- `voice.autoSpeakChat` (on by default) speaks chat replies; `voice.conversation` stores the conversation-mode default.
+**Subscription audio is unavailable** under the [supported SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). Selecting `subscription` refuses audio before network or credential access. Microphone clips are capped at 30 seconds; conversation mode listens again after replies and stops with Escape, its toggle or chat close.
+
+Build with Node ≥24: `npm ci`, `npm test`, `npm run typecheck`, then `node scripts/gates/run.mjs`. TypeScript sources are in `src/`, compiled code in `dist/`, and the generated DSH browser wrapper in `lib/client.js`. macOS and WSL installers build the same plugin. Backend changes need a DSH restart after active sessions finish.
 
 ## Desktop Companion (Optional)
 
@@ -121,8 +118,8 @@ whale-girl:
   voice:
     enabled: false
     provider: browser        # browser | openai
-    sttModel: whisper-1      # speech-to-text model for the microphone
-    instructions: Говори как милая игривая девочка-кит  # only for gpt-4o*-tts
+    sttModel: gpt-transcribe      # speech-to-text model for the microphone
+    instructions: Говори как милая игривая девочка-кит  # Speech style for Realtime and gpt-4o*-tts
     conversation: false      # conversation-mode default
     autoSpeakChat: true      # speak chat replies
   chat:
@@ -139,11 +136,11 @@ whale-girl:
       - https://hnrss.org/frontpage
 ```
 
-Full option list and why the semantic layer (XP / titles) is sealed: `lib/src/config.mjs`. **Not configurable** (changing XP / title thresholds would break the accumulation ledger).
+Full option list and why the semantic layer (XP / titles) is sealed: `src/core/config.ts`. **Not configurable** (changing XP / title thresholds would break the accumulation ledger).
 
 ## Characters
 
-🎭 "Switch Character" cycles characters (or set `whale-girl:character` in localStorage); the button is **greyed out when the manifest has a single character** ("No other characters available"). Every character ships **all 15 states** (full contract: [docs/sprites-spec.md](docs/sprites-spec.md)); new characters: [docs/adding-a-character.md](docs/adding-a-character.md).
+The character is chosen from the manifest or the `whale-girl:character` localStorage preference when the page loads. Every character ships **all 15 states** (full contract: [docs/sprites-spec.md](docs/sprites-spec.md)); new characters: [docs/adding-a-character.md](docs/adding-a-character.md).
 
 ## Reference Implementation
 

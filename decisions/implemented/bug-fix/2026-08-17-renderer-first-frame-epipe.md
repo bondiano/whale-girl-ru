@@ -14,7 +14,7 @@ Tauri 渲染壳本地部署时发现宠物窗口空白：引擎首轮即产出�
 
 - **renderer 同态早退兜底**（`render/renderer.js` `switchAnim`）：`name === animState` 且当前
   sheet 未缓存时补 `ensureSheet + drawFrame + reportHitarea`——首帧必渲染，重复同态事件不再重复加载。
-- **渲染桥 EPIPE 兜底**（`lib/index.mjs` `--render-json` 分支）：`process.stdout.on('error')`
+- **渲染桥 EPIPE 兜底**（`src/index.ts` `--render-json` 分支）：`process.stdout.on('error')`
   捕获 `EPIPE` 后优雅退出（父进程已亡，无需继续心跳）。
 
 ## Alternatives considered
@@ -32,4 +32,4 @@ Tauri 渲染壳本地部署时发现宠物窗口空白：引擎首轮即产出�
 
 - 空闲宿主（首动画即 idle）下宠物首帧正常渲染（Tauri 实测画面上屏）。
 - 渲染壳崩溃/退出后引擎进程优雅退出，无 EPIPE 崩栈残留。
-- 引用点：`desktop/render/renderer.js`（switchAnim）、`desktop/lib/index.mjs`（--render-json）。
+- 引用点：`desktop/render/renderer.js`（switchAnim）、`desktop/src/index.ts`（--render-json）。

@@ -21,7 +21,7 @@ A 模式宠物只在 DSH Web GUI 页面内可见、依赖页面焦点；用户�
   （manifest + sprite dataURL 经 IPC 喂给 renderer，renderer 零网络、无 CORS 面）。
 - **presence 契约**：每 15s `{online:true}`（whale-girl `PRESENCE_TTL_MS=45s`，余量 3 次心跳）；
   退出 `{online:false}`；崩溃靠 TTL 45s 自动过期回网页端。桌面在线时网页端隐藏宠物，避免双宠。
-- **状态机/调度**：对齐 `lib/client/logic.mjs` 的 `pickState` 优先级（burst > 互动瞬发 > wait >
+- **状态机/调度**：对齐 `src/client/logic.ts` 的 `pickState` 优先级（burst > 互动瞬发 > wait >
   回合完成 > working 插曲 > think > joy > sleep > walk > idle），纯 Node、无 DOM，复用同一状态集合。
 - **渲染**：Electron 透明置顶窗 Canvas 帧播放；点击投喂/拖拽换位、资历角标。
 - **headless**：`--headless` 只跑心跳+轮询+SSE（CI / 无桌面环境自测）。

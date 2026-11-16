@@ -20,8 +20,8 @@ Status: implemented
 
 - **删除保存 / 放弃修改两颗按钮**，改为**即时写入**：开关点击即写；数字与文案池在**失焦或回车**时
   提交（不做逐键写入，避免每敲一个字提交一次）。
-- **删除暂存模型**：`lib/client/settings-form.mjs` 与其单测一并移除，保留其中仍然需要、且与界面无关
-  的部分，收进新的纯模块 `lib/client/settings-fields.mjs`：字段规格 `CARD_FIELDS`、叶取值 `leafOf`、
+- **删除暂存模型**：`src/client/settings-form.ts` 与其单测一并移除，保留其中仍然需要、且与界面无关
+  的部分，收进新的纯模块 `src/client/settings-fields.ts`：字段规格 `CARD_FIELDS`、叶取值 `leafOf`、
   叶值等价 `sameLeaf`、快照派生 `deriveState`、文案池解析，以及即时写入 `writeField`。
 - **写路径走官方 `mutate` 的深路径，且不自己传 revision**：`writeField` 提交
   `[{ op: 'set', path: path.split('.'), value }]`，把排队与栅栏留给 `ConfigFormController` 自己

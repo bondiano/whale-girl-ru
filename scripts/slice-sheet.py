@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""AI 生图 → 规范 PNG 资源工具（PIL + numpy，无第三方依赖）。
+"""Convert AI-generated images into standardized whale-girl PNG assets using PIL and numpy.
 
-把 raw 的 AI 生图（贴纸合集/网格/单图/分栏）处理成 whale-girl 可用的规范帧：
-统一尺寸、底对齐、内容占比达标、帧序校正、纯色抠图。
+Process sticker collections, grids, single images, or columns into consistent frames:
+standard size, bottom alignment, target content ratio, corrected frame order, and solid-color removal.
 
-模式（三选一）：
-  --single  单状态：单张图或按列分栏（--columns 2 → 每栏一状态），逐栏抠图→规范化
-  --grid    网格模式：按声明网格（--grid RxC）或自动检测（--auto）切子图
-  --sheet   sheet 模式：行=状态、列=帧，连通域分段产出每状态一张帧 sheet
+Modes (choose one):
+  --single  One image or columns (--columns 2 produces one state per column); key and normalize each.
+  --grid    Split a declared grid (--grid RxC), or detect it with --auto.
+  --sheet   Rows are states and columns are frames; connected components produce one sheet per state.
 
-通用参数：
-  --key        抠图：gray=亮灰掩膜；auto=取边框色；R,G,B（多色 | 分隔）
-  --size       输出帧边长（默认 256）
-  --normalize-scale  内容占比目标（默认 0.88：角色高度占帧 88%，加透明边缘）
-  --align      底对齐（bottom，默认）或居中（center）
-  --swap-frames 帧序校正：逗号分隔的目标顺序，如 0,2,1（AI 帧序乱时用）
-  --out        输出目录
+Common options:
+  --key        Background key: gray for bright-gray masks; auto for border color; R,G,B (multiple colors separated by |).
+  --size       Output frame edge length, default 256.
+  --normalize-scale  Target content height ratio, default 0.88, leaving transparent margins.
+  --align      Bottom alignment (bottom, default), or center.
+  --swap-frames Correct frame order with comma-separated target indices, such as 0,2,1.
+  --out        Output directory.
 
-示例：
-  # 单状态单帧（think 图）
+Examples:
+  # One state and one frame (think image).
   python3 scripts/slice-sheet.py think.png --single --key 252,2,249 --out assets/characters/whale-girl/
-  # 左右分栏（左 think 右 wait）
+  # Two columns: think on the left and wait on the right.
   python3 scripts/slice-sheet.py pair.png --single --columns 2 --states think,wait --key 252,2,249 --out .../
-  # 3x3 网格（每格一子图）
+  # A 3x3 grid with one subimage per cell.
   python3 scripts/slice-sheet.py grid.png --grid 3x3 --key auto --out .../
-  # sheet 模式（行=状态，列=帧）
+  # Sheet mode: rows are states and columns are frames.
   python3 scripts/slice-sheet.py grid.png --sheet 3x3 --states idle,working --frames 3,3 --key auto --out .../
-  # 帧序校正（AI 把 walk 帧排成 2,0,1）
+  # Correct walk frames generated in the order 2,0,1.
   python3 scripts/slice-sheet.py walk.png --single --swap-frames 2,0,1 --out .../
 """
 import argparse
@@ -38,20 +38,20 @@ import numpy as np
 from PIL import Image
 
 ALPHA_THRESHOLD = 16
-DEFAULT_SCALE = 0.88  # 角色内容高度占帧比例（与现有 15 状态一致；透明边缘由此产生）
+DEFAULT_SCALE = 0.88  # Character height as a fraction of frame height, matching all 15 states and leaving transparent margins.
 
 
-# ---------- 抠图核心（保留自原实现） ----------
+# ---------- Background removal (retained from the original implementation) ----------
 
 def detect_bg(img):
-    """背景色估计：边框环像素中位色。"""
+    """Estimate the background color from the median of the border-ring pixels."""
     arr = np.asarray(img.convert('RGB'), dtype=np.int16)
     border = np.concatenate([arr[0], arr[-1], arr[:, 0], arr[:, -1]])
     return np.median(border, axis=0).astype(int).tolist()
 
 
 def gray_key(img):
-    """亮灰掩膜键：AI 假透明棋盘格（周期性灰白）。饱和或深色视为内容，亮且灰透明。"""
+    """Key bright-gray fake transparency checkerboards; saturated or dark pixels are content, bright gray pixels become transparent."""
     from PIL import ImageFilter
     arr = np.asarray(img.convert('RGB'), dtype=np.int16)
     sat = arr.max(axis=2) - arr.min(axis=2)
@@ -65,7 +65,7 @@ def gray_key(img):
 
 
 def bg_floodfill(img, bg_colors, tol):
-    """图形学去背景：与边界 4-连通 的近背景色区域删除（角色内部同色因被轮廓包围而保留）。"""
+    """Remove near-background regions that are four-connected to the border; enclosed matching colors inside the character remain."""
     import numpy as np
     from PIL import Image as _Image
     arr = np.asarray(img.convert('RGB'), dtype=np.int16)
@@ -98,7 +98,7 @@ def bg_floodfill(img, bg_colors, tol):
 
 
 def closed_islands_cleanup(img, bg_colors):
-    """封闭岛清理 + 极洋红微斑清除（角色契约不含洋红）。"""
+    """Clean enclosed islands and tiny extreme-magenta spots; the character palette excludes magenta."""
     from PIL import Image as _Image
     arr = np.asarray(img.convert('RGB'), dtype=np.int16)
     a = np.asarray(img.convert('RGBA').getchannel('A'), dtype=np.int16)
@@ -115,7 +115,7 @@ def closed_islands_cleanup(img, bg_colors):
 
 
 def magenta_free_cleanup(img, sp_thresh=25):
-    """全量洋红清除（角色=深蓝+白，任何 sp>25 的像素都不是角色）。"""
+    """Remove all magenta; the character is deep blue and white, so pixels with sp > 25 are outside its palette."""
     from PIL import Image as _Image
     arr = np.asarray(img.convert('RGBA'), dtype=np.int16)
     a = arr[:, :, 3]
@@ -129,7 +129,7 @@ def magenta_free_cleanup(img, sp_thresh=25):
 
 
 def defringe(img, erode=1):
-    """边缘侵蚀 + 羽化：剥背景混合最外层，羽化平滑锯齿。"""
+    """Erode edges and feather them, removing the outer background-blended layer and smoothing jagged edges."""
     from PIL import ImageFilter
     a = img.getchannel('A')
     for _ in range(erode):
@@ -141,7 +141,7 @@ def defringe(img, erode=1):
 
 
 def apply_key(img, key, repair):
-    """按 --key 参数抠图。返回处理后的 RGBA 图。"""
+    """Remove the background according to --key and return the processed RGBA image."""
     if not key:
         return img.convert('RGBA')
     if key == 'gray':
@@ -164,11 +164,11 @@ def apply_key(img, key, repair):
     return img
 
 
-# ---------- 规范化（统一输出契约） ----------
+# ---------- Normalization (shared output contract) ----------
 
 def normalize_content(img, size, scale=DEFAULT_SCALE, align='bottom'):
-    """规范化单帧内容：裁透明边 → 缩放到「内容高 = size × scale」→ 底对齐/居中 → 加透明边缘。
-    返回 规范帧（size × size，内容占 scale 比例，脚贴底）。"""
+    """Normalize one frame: crop transparency, scale content height to size * scale, align, and add transparent margins.
+    Return a size-by-size frame whose content occupies the requested ratio and is bottom-aligned or centered."""
     bbox = img.getchannel('A').getbbox()
     if bbox is None:
         return None
@@ -186,17 +186,17 @@ def normalize_content(img, size, scale=DEFAULT_SCALE, align='bottom'):
 
 
 def content_ratio(img):
-    """内容高度占帧比例（诊断用）。"""
+    """Content-height to frame-height ratio, for diagnostics."""
     bbox = img.getchannel('A').getbbox()
     if bbox is None:
         return 0.0
     return (bbox[3] - bbox[1] + 1) / img.height
 
 
-# ---------- 网格/行带分析（保留自原实现） ----------
+# ---------- Grid and row-band analysis (retained from the original implementation) ----------
 
 def profile_bounds(mask, axis, n):
-    """内容感知网格边界：沿 axis 找空白带取中间最宽的 n-1 条中心作切分线。"""
+    """Find content-aware grid boundaries along axis by splitting at the centers of the widest n-1 interior blank bands."""
     total = mask.sum(axis=axis)
     length = len(total)
     blank = [i for i, v in enumerate(total) if v < 3]
@@ -218,7 +218,7 @@ def profile_bounds(mask, axis, n):
 
 
 def content_extent_bounds(mask, axis, n):
-    """内容范围等分（profile 无空白带时回退）。"""
+    """Divide the content range evenly when the profile has no blank bands."""
     total = mask.sum(axis=axis)
     idx = np.nonzero(total > 3)[0]
     if len(idx) < 2:
@@ -229,7 +229,7 @@ def content_extent_bounds(mask, axis, n):
 
 
 def detect_grid(img, max_cells=8):
-    """下采样 alpha 找空行/空列推断网格。"""
+    """Infer the grid by downsampling alpha and finding empty rows and columns."""
     w, h = img.size
     small = img.resize((64, 64), Image.LANCZOS).getchannel('A')
     data = small.load()
@@ -264,7 +264,7 @@ def detect_grid(img, max_cells=8):
 
 
 def row_band_comps(img, row_bounds, row, expand=90, min_area=40):
-    """行带连通域分析（帧由连通域定义，格子不裁剪）。"""
+    """Analyze row-band connected components; components define frames without cropping them to grid cells."""
     from collections import deque
     (yt, yb) = row_bounds[row]
     cy0 = max(0, yt - expand)
@@ -301,7 +301,7 @@ def row_band_comps(img, row_bounds, row, expand=90, min_area=40):
 
 
 def build_sheet_from_comps(band, comps, state_centers, my_center, size, row_y0, row_y1, max_frames=0, scale=DEFAULT_SCALE, deco_margin=90):
-    """由行带连通域构建一个状态的帧 sheet（角色+装饰件，底中对齐，内容占比 scale）。"""
+    """Build a state sheet from row-band components: character and decorations, bottom-centered at the requested content ratio."""
     if not comps:
         return None, 0
     max_area = comps[0][0]
@@ -395,10 +395,10 @@ def build_sheet_from_comps(band, comps, state_centers, my_center, size, row_y0, 
     return sheet, len(norm)
 
 
-# ---------- 帧序校正 ----------
+# ---------- Frame reordering ----------
 
 def reorder_frames(sheet_img, frames, order):
-    """帧序校正：把横排帧 sheet 按 order（目标顺序索引）重排。"""
+    """Reorder a horizontal frame sheet using order as the target sequence of source indices."""
     if frames <= 1 or order is None:
         return sheet_img
     idx = [int(v) for v in order.split(',')]
@@ -412,10 +412,10 @@ def reorder_frames(sheet_img, frames, order):
     return out
 
 
-# ---------- 模式实现 ----------
+# ---------- Mode implementations ----------
 
 def mode_single(img, args):
-    """单状态：整图或按列分栏，每块规范化输出。"""
+    """Single-state mode: normalize the whole image or each column independently."""
     states = [s.strip() for s in args.states.split(',')] if args.states else None
     n_cols = args.columns or (len(states) if states else 1)
     out = Path(args.out)
@@ -429,7 +429,7 @@ def mode_single(img, args):
         if norm is None:
             report['outputs'].append({'col': i, 'file': None, 'skipped': 'empty'})
             continue
-        # 帧序校正（单列含多帧时）
+        # Correct frame order when a single column contains multiple frames.
         if args.swap_frames:
             nf = len(args.swap_frames.split(','))
             norm = reorder_frames(norm, nf, args.swap_frames)
@@ -441,7 +441,7 @@ def mode_single(img, args):
 
 
 def mode_grid(img, args):
-    """网格模式：按声明网格或自动检测，每格规范化。"""
+    """Grid mode: normalize each cell from the declared or automatically detected grid."""
     if args.auto:
         grid = detect_grid(img)
         if grid is None:
@@ -481,7 +481,7 @@ def mode_grid(img, args):
 
 
 def mode_sheet(img, args):
-    """sheet 模式：行=状态、列=帧，连通域分段产出每状态帧 sheet。"""
+    """Sheet mode: rows are states and columns are frames; connected components produce one sheet per state."""
     rows_s, cols_s = args.sheet.lower().split('x')
     rows, cols = int(rows_s), int(cols_s)
     w, h = img.size
@@ -550,13 +550,13 @@ def mode_sheet(img, args):
 def main():
     ap = argparse.ArgumentParser(description='AI 生图 → 规范 PNG 资源工具')
     ap.add_argument('input')
-    # 模式（三选一）
+    # Modes (choose one).
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument('--single', action='store_true', help='单状态：整图或按列分栏')
     mode.add_argument('--grid', help='网格模式：声明网格 ROWSxCOLS')
     mode.add_argument('--auto', action='store_true', help='网格模式：自动检测')
     mode.add_argument('--sheet', help='sheet 模式：网格 ROWSxCOLS（行=状态列=帧）')
-    # 通用
+    # Common options.
     ap.add_argument('--key', metavar='BG', help='抠图：gray | auto | R,G,B（多色 | 分隔）')
     ap.add_argument('--repair', action='store_true', help='键后硬化 alpha')
     ap.add_argument('--size', type=int, default=256, help='输出帧边长（默认 256）')
@@ -564,12 +564,12 @@ def main():
     ap.add_argument('--align', choices=['bottom', 'center'], default='bottom', help='内容对齐（默认 bottom 底对齐）')
     ap.add_argument('--swap-frames', help='帧序校正：目标顺序索引，如 0,2,1')
     ap.add_argument('--out', default='lib/assets/raw/slices', help='输出目录')
-    # single 模式
+    # Single-state mode.
     ap.add_argument('--columns', type=int, help='single 分栏数（左右分栏）')
     ap.add_argument('--states', help='single 分栏/sheet 的状态名（逗号）')
-    # grid 模式
+    # Grid mode.
     ap.add_argument('--layout', help='grid 状态名列表（行优先，数量=格子数）')
-    # sheet 模式
+    # Sheet mode.
     ap.add_argument('--frames', help='sheet 每行帧数（逗号）')
     ap.add_argument('--regions', help='sheet 更灵活：state@row:colStart-colEnd,...')
     ap.add_argument('--crop-margin', type=int, default=0, help='切分前四边裁剪 N px')

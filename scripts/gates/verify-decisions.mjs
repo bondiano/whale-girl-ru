@@ -1,9 +1,7 @@
-// 门禁：决策记录格式与分类合法。
-// 拒绝不变量：decisions/ 下任何记录违反契约——头部缺失、状态行与所在生命周期目录不一致、
-// 必需章节缺失、已实施记录出现规划语气标题、分类不在封闭集合、文件名不带日期、
-// 取代声明不带链接 / 部分取代缺双向互链 / 完全取代未归档（取代检查的输出契约，
-// 见 decisions/README.md「每条新记录都触发取代检查」）。
-// 只读、确定性；archived/ 内容本身跳过（其出站链接由 verify-md-links 跳过）。
+// Validate decision-record format, lifecycle, category, filename dates, and required sections.
+// Supersession declarations need links; partial replacements need reciprocal links,
+// and full replacements need an archived predecessor.
+// The check is read-only and deterministic; archived contents are frozen and skipped.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, dirname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -22,7 +20,7 @@ const FILENAME_RE = /^\d{4}-\d{2}-\d{2}-.+\.md$/
 const STATUS_RE = /^Status: (.+)$/
 const ARCHIVED_MARKER = /^Archived: \d{4}-\d{2}-\d{2}$/
 const PRE_FORMAT_MARKER = 'decision-format: alternatives-not-recorded'
-// 取代声明：仅「完全取代/部分取代」触发（决策间取代契约）；语义性「取代」（如「字段取代 X 语义」）不触发。
+// Only explicit full/partial decision supersession declarations trigger link checks; ordinary semantic uses do not.
 const SUPERSEDE_RE = /完全取代|部分取代/
 const LINK_RE = /\]\(([^)]+\.md)\)/g
 
@@ -42,7 +40,7 @@ function readSafe(file) {
   }
 }
 
-/** 解析记录正文：返回 { lines, status, archived }。 */
+/** Parse a decision record into { lines, status, archived }. */
 function parseRecord(file) {
   const text = readFileSync(file, 'utf8')
   const lines = text.split('\n')
@@ -59,7 +57,7 @@ function parseRecord(file) {
   return { lines, status, archived }
 }
 
-/** 校验 decisions/ 树。返回 { ok, errors }。 */
+/** Validate the decisions tree and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   const decisionsRoot = join(root, 'decisions')
@@ -69,7 +67,7 @@ export function check(root = ROOT) {
     const lifecycleDir = join(decisionsRoot, lifecycle)
     if (!existsSafe(lifecycleDir)) continue
     for (const entry of readdirSync(lifecycleDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue // 非目录（如遗留文件）不校验
+      if (!entry.isDirectory()) continue // Ignore non-directory entries, including legacy loose files.
       if (!CATEGORIES.has(entry.name)) {
         errors.push(`decisions/${lifecycle}/${entry.name}: 分类不在封闭集合 ${[...CATEGORIES].join('/')}`)
         continue
@@ -121,7 +119,7 @@ function checkRecord(file, relPath, lifecycle, errors) {
   checkSupersede(file, relPath, errors)
 }
 
-/** 取代检查的输出契约（决策间取代声明）：带链接、部分取代双向互链、完全取代归档闭环。 */
+/** Require linked supersession declarations, reciprocal partial links, and archived full replacements. */
 function checkSupersede(file, relPath, errors) {
   const text = readSafe(file)
   if (text === null) return
@@ -150,7 +148,7 @@ function checkSupersede(file, relPath, errors) {
   }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-decisions] ${e}`)

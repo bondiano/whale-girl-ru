@@ -1,12 +1,11 @@
-// 更新检查纯逻辑单测（node:test，零依赖）。归属：lib/src/update.mjs 的行为改动跑本文件
-// （来源 spec 归一、锁文件读值、三态判断、应用结果映射、更新 spec 计划、git HEAD 解析）。
-// 版本比较在 tests/semver.test.mjs。
+// Pure update regressions cover source specs, lockfiles, upstream states, results,
+// installation plans, and Git HEAD parsing; semantic versions have a separate suite.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   applicationState, decideUpdate, parseInstallSource, parseRepository, readLockIdentity, resolveGitHead, shortSha,
   updateSpecs,
-} from '../lib/src/update.mjs'
+} from '../dist/core/update.js'
 
 test('parseRepository：github 的三种写法归一，非 github 返回 undefined', () => {
   assert.deepEqual(parseRepository('git+https://github.com/vlln/whale-girl.git'), { owner: 'vlln', repo: 'whale-girl' })

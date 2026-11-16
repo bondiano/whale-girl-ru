@@ -20,9 +20,9 @@
 官方 **bundle 插件** 格式（仓库根 `package.json` 的 `dsh.bundle` + `dsh.client`）。经官方 profile 管理：
 
 ```sh
-dsh plugin --profile web add whale-girl                        # npm 源（构建产物随包发布）
-# 想跟最新提交而不是发布版：dsh plugin --profile web add "github:vlln/whale-girl#main"
-# 或本地目录：dsh plugin --profile web add <whale-girl 本地路径>
+dsh plugin --profile web add whale-girl                        # npm package, including built assets
+# Track main: dsh plugin --profile web add "github:vlln/whale-girl#main"
+# Local source: dsh plugin --profile web add <local-whale-girl-path>
 ```
 
 装完 **重启 web**（bundle 层在启动时合成），右下角出现宠物：点击弹出菜单（🍗 喂食 / 🎾 玩耍），拖拽可移动；hover 显示状态条（资历等级/任务数/最近共同回忆）。初始配置/欢迎页（onboarding）宠物隐藏。
@@ -48,20 +48,26 @@ dsh plugin --profile web add whale-girl                        # npm 源（构�
 
 ## 对话与语音
 
-菜单 **💬 聊一聊** 打开对话：回答逐字显示，开语音时念出来；**对话模型**下拉框选择模型（留空 = 宿主默认）。宠物知道**当前会话**（回合时长、工具与剩余时间估算），只按事实回答；问新闻时抓取 RSS/Atom 并转述 2–3 条，抓不到就说明。**🎙** 录音 30 秒，识别后发送，失败退回 `SpeechRecognition`；**🔁** 回答后自动再开麦。
+菜单 **⚙️ Настройки** 打开插件设置。菜单中的 **🐳 «Как дела?»** 查询 DSH 当前选中的会话。`chat.sessionContext` 控制是否发送活动状态及最多六条可见用户/助手消息（每条 400 字符）；不发送工具输出、推理或系统提示。聊天历史按模型与会话隔离，只留在进程内存。
+
+语音默认关闭。`browser` 使用系统语音及浏览器识别；`openai` 明确选择**单独计费的 API**，默认 `gpt-transcribe` 识别、Realtime `gpt-realtime-2.1-mini` 配 `marin` 合成，密钥只留在服务端。显式兼容模型保留 `/audio/speech`。错误会显示，不自动换提供方。麦克风录音最多 30 秒；对话模式在回复后继续听，Esc/关闭停止。
+
+**ChatGPT 订阅不支持此音频接口**，见 [SIWC 限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)；`subscription` 在联网前拒绝。新闻按需读取 RSS/Atom。
+
+源码为 `src/` TypeScript，输出 `dist/` 和 `lib/client.js`。Node ≥24：`npm ci`、`npm test`、`npm run typecheck`、`node scripts/gates/run.mjs`。macOS 与 WSL 安装器均先构建；后端变更需在活跃会话结束后重启 DSH。
 
 ## 桌面伴侣（可选）
 
 `desktop/` 是**独立桌面伴侣应用**（Node 引擎 + Tauri 渲染壳，零运行时依赖），把鲸鱼娘渲染到操作系统桌面常驻。**不随 `dsh plugin` 安装**——想要桌宠的用户自行启用：
 
 ```sh
-# 前置：Node ≥18；桌面渲染壳需 Rust 工具链（cargo）
-npm install -g whale-girl-desktop   # npm 源安装
-whale-girl-desktop --headless       # 无窗模式可用：presence 心跳 + 状态轮询 + SSE
-cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # 首次编译约 5-15 分钟；产物 target/release/whale-girl-desktop（约 12MB）
-./target/release/whale-girl-desktop   # 启动透明置顶桌宠（默认连本机 DSH 3080）
-# WHALE_GIRL_BASE_URL=http://IP:PORT 指向非本机 DSH
-# 或从源码：cd desktop && npm install && cd src-tauri && cargo build --release
+# Requires Node >=18 and Rust (cargo) for the desktop shell
+npm install -g whale-girl-desktop   # Install from npm
+whale-girl-desktop --headless       # Headless: presence heartbeat, polling and SSE
+cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # First build: 5-15 min; target/release/whale-girl-desktop (~12 MB)
+./target/release/whale-girl-desktop   # Transparent, always-on-top pet; local DSH port 3080
+# WHALE_GIRL_BASE_URL=http://IP:PORT selects a remote DSH
+# From source: cd desktop && npm install && cd src-tauri && cargo build --release
 ```
 
 - 消费 whale-girl 既有公开端点（`/state`、`/events`、`/presence`、`/interact`、`/config`、`/assets`），**不改动插件本体**；运行期间网页端宠物自动隐藏（presence 契约），退出后恢复。
@@ -97,25 +103,25 @@ cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # 首
 
 ```yaml
 whale-girl:
-  enabled: true      # 网页端渲染开关（与桌面伴侣并存时设 false 关闭网页端宠物，避免双宠物）
-  sessionMemory: false # 会话记忆（本机 sessions.json 记录 + 血缘回读；默认关，见配置卡片说明）
-  size: 110          # 宠物尺寸 px（64–160）
-  opacity: 1         # 常态透明度（0.2–1）
+  enabled: true      # Browser pet; false when using the desktop companion
+  sessionMemory: false # Local session memory and ancestry recall; off by default
+  size: 110          # Pet size in px (64-160)
+  opacity: 1         # Opacity (0.2-1)
   walk:
-    enabled: true    # 游走开关
+    enabled: true    # Enable wandering
   sleepAfterMs: 60000
   voice:
     enabled: false
     provider: browser        # browser | openai
-    sttModel: whisper-1      # 麦克风语音识别模型
-    instructions: Говори как милая игривая девочка-кит  # 仅 gpt-4o*-tts 使用
-    conversation: false      # 连续对话默认值
-    autoSpeakChat: true      # 自动朗读对话回答
+    sttModel: gpt-transcribe      # Microphone transcription model
+    instructions: Говори как милая игривая девочка-кит  # Speech style for Realtime and gpt-4o*-tts
+    conversation: false      # Conversation mode default
+    autoSpeakChat: true      # Speak chat replies
   chat:
     enabled: true
-    provider: ''             # 留空 = 宿主模型
+    provider: ''             # Empty = host model
     model: ''
-    sessionContext: true     # 把当前会话事实放进上下文
+    sessionContext: true     # Include selected-session facts
   news:
     enabled: true
     maxItems: 5
@@ -125,27 +131,15 @@ whale-girl:
       - https://hnrss.org/frontpage
 ```
 
-完整配置项清单与语义层（XP/称号）封闭说明见 `lib/src/config.mjs`。**语义层不可配**（改 XP/称号阈值会破坏积累账本一致性）。
+完整配置项清单与语义层（XP/称号）封闭说明见 `src/core/config.ts`。**语义层不可配**（改 XP/称号阈值会破坏积累账本一致性）。
 
 ## 角色
 
-菜单「🎭 换角色」循环切换角色（或设置 localStorage `whale-girl:character`）；**manifest 仅 1 个角色时按钮置灰**（悬停提示「暂无其他角色」）。每个角色提供**全部 15 状态**素材（素材全量契约，见 [docs/sprites-spec.md](docs/sprites-spec.md)）；贡献新角色指南见 [docs/adding-a-character.md](docs/adding-a-character.md)。
+页面加载时按 manifest 或 localStorage `whale-girl:character` 选择角色。每个角色提供**全部 15 状态**素材（素材全量契约，见 [docs/sprites-spec.md](docs/sprites-spec.md)）；贡献新角色指南见 [docs/adding-a-character.md](docs/adding-a-character.md)。
 
-## 作为参考实现
+## 开发与贡献
 
-whale-girl 是官方 **bundle 插件格式**的完整范本（`dsh.bundle` + `cordis.patch.yml` + `lib/` 布局，随官方机制演进）——开发新插件可对照：
-
-- **结构**：`lib/`（入口/纯逻辑/client/素材）与 docs/decisions/scripts 分离，见根 [AGENTS.md](AGENTS.md)
-- **规范**：门禁（`scripts/gates/run.mjs`）+ 决策记录 + 素材全量契约；开发引导见 plugin-registry 的 [make-dsh-plugin skill](https://github.com/vlln/plugin-registry/tree/main/skills/make-dsh-plugin) 与 [cookbook](https://github.com/vlln/plugin-registry/blob/main/docs/cookbook/creating-a-plugin.md)，踩过的坑见 [gotchas](https://github.com/vlln/plugin-registry/blob/main/skills/make-dsh-plugin/references/gotchas.md)
-
-## 贡献
-
-**欢迎提交 issue 和建议**——你的反馈直接决定宠物的下一步：
-
-- 🐛 **遇到问题**：提交 issue，附复现步骤、浏览器与 dsh 版本；客户端问题附控制台报错更佳
-- 💡 **功能建议**：参考 [docs/state-machine.md](docs/state-machine.md) 与 [docs/growth-system.md](docs/growth-system.md) 了解现状，说明期待效果
-- 🎨 **新角色**：见 [docs/adding-a-character.md](docs/adding-a-character.md) §贡献角色速览——只读契约，产出 15 张 sheet + manifest 条目，本地 `verify-assets` 验收
-- 🔧 **代码贡献**：每个非平凡改动带决策记录（`decisions/`）、门禁自证、单一性质提交（见 [docs/AGENTS.md](docs/AGENTS.md) 与根 [AGENTS.md](AGENTS.md)）
+官方 bundle 契约见 [AGENTS.md](AGENTS.md)，文档与决策要求见 [docs/AGENTS.md](docs/AGENTS.md)。问题报告请附复现步骤及浏览器、DSH 版本。新增角色遵循 [角色素材规范](docs/sprites-spec.md)，代码行为变更须附决策记录与回归测试。
 
 ## 致谢
 

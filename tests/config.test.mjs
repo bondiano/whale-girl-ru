@@ -1,8 +1,8 @@
-// src/config.mjs 单测（node:test）。归属：配置 schema/默认值/读值改动跑本文件。
-// 注意：本测试在插件安装目录运行（@deepseek-ai/schemastery 从依赖解析）。
+// Configuration defaults, schema, and readback regressions.
+// Run with the package's installed Schemastery dependency.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULTS, buildSchema, readConfig, NAMESPACE } from '../lib/src/config.mjs'
+import { DEFAULTS, buildSchema, readConfig, NAMESPACE } from '../dist/core/config.js'
 
 test('NAMESPACE 与 DEFAULTS 完整性', () => {
   assert.equal(NAMESPACE, 'whale-girl')
@@ -12,12 +12,12 @@ test('NAMESPACE 与 DEFAULTS 完整性', () => {
   assert.equal(DEFAULTS.sessionMemory, false, '会话记忆默认关（opt-in）')
   assert.equal(DEFAULTS.walk.enabled, true)
   assert.equal(DEFAULTS.walk.maxWaitMs, 40000)
-  // Голос: STT рядом с TTS, разговорный режим и автоозвучка беседы — opt-in по факту.
-  assert.equal(DEFAULTS.voice.sttModel, 'whisper-1')
+  // Voice remains opt-in, including conversation mode and automatic chat speech.
+  assert.equal(DEFAULTS.voice.sttModel, 'gpt-transcribe')
   assert.equal(typeof DEFAULTS.voice.instructions, 'string')
   assert.equal(DEFAULTS.voice.conversation, false)
   assert.equal(DEFAULTS.voice.autoSpeakChat, true)
-  // Контекст активной сессии в беседе включён по умолчанию; новости — включены.
+  // Session context and news are enabled by default.
   assert.equal(DEFAULTS.chat.sessionContext, true)
   assert.equal(DEFAULTS.news.enabled, true)
   assert.equal(DEFAULTS.news.maxItems, 5)
@@ -27,20 +27,20 @@ test('NAMESPACE 与 DEFAULTS 完整性', () => {
 
 test('buildSchema：条目 Config 用，解析出 volatile 实时引用', () => {
   const schema = buildSchema()
-  assert.equal(typeof schema, 'function') // z.object 返回可调用的 schema 构造器
+  assert.equal(typeof schema, 'function') // z.object returns a callable schema constructor.
   const result = schema['~standard'].validate({})
   assert.equal(result.issues, undefined)
-  // live 字段是宿主注入的 { get() } 引用（不重挂载原地换值的传输面），含嵌套叶与数组叶。
+  // Live fields are host-injected { get() } references, including nested and array leaves.
   assert.equal(result.value.size.get(), 110)
   assert.equal(result.value.sessionMemory.get(), false, 'sessionMemory 是 volatile 叶')
   assert.equal(result.value.walk.enabled.get(), true)
   assert.deepEqual(result.value.replies.feed.get(), DEFAULTS.replies.feed)
-  assert.equal(result.value.voice.sttModel.get(), 'whisper-1')
+  assert.equal(result.value.voice.sttModel.get(), 'gpt-transcribe')
   assert.equal(result.value.voice.conversation.get(), false)
   assert.equal(result.value.chat.sessionContext.get(), true)
   assert.equal(result.value.news.maxItems.get(), 5)
   assert.deepEqual(result.value.news.feeds.get(), DEFAULTS.news.feeds)
-  // 未标 volatile 的容器保持普通对象（volatile 只落在叶上）。
+  // Containers remain plain objects; only leaves are volatile.
   assert.equal(typeof result.value.walk.enabled, 'object')
 })
 
@@ -54,7 +54,7 @@ test('readConfig：解引用 volatile 叶、与 DEFAULTS 合并补缺', () => {
   assert.equal(next.size, 130)
   assert.equal(next.walk.enabled, false)
   assert.deepEqual(next.replies.feed, ['a'])
-  // 缺键回退 DEFAULTS（schema 补默认前的兜底，settings.yaml 缺节也安全）。
+  // Missing keys fall back to DEFAULTS before schema defaults are injected.
   assert.equal(next.opacity, DEFAULTS.opacity)
   assert.equal(next.walk.speedPxPerSec, DEFAULTS.walk.speedPxPerSec)
   assert.deepEqual(next.replies.play, DEFAULTS.replies.play)
@@ -99,4 +99,14 @@ test('readConfig：voice/chat 深合并（缺键补默认，嵌套不丢）', ()
   assert.equal(next.voice.provider, DEFAULTS.voice.provider, 'остальные листья — из DEFAULTS')
   assert.equal(next.chat.systemPrompt, 'будь милой')
   assert.equal(next.chat.maxTokens, DEFAULTS.chat.maxTokens)
+})
+
+test('API voice defaults use current models without enabling API billing', () => {
+  assert.equal(DEFAULTS.voice.enabled, false)
+  assert.equal(DEFAULTS.voice.provider, 'browser')
+  assert.equal(DEFAULTS.voice.model, 'gpt-realtime-2.1-mini')
+  assert.equal(DEFAULTS.voice.sttModel, 'gpt-transcribe')
+  assert.equal(DEFAULTS.voice.voice, 'marin')
+  assert.equal(DEFAULTS.voice.apiKeyEnv, 'WHALE_GIRL_TTS_API_KEY')
+  assert.equal(readConfig({ voice: { provider: 'subscription' } }).voice.provider, 'subscription')
 })

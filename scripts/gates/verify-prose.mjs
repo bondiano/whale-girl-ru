@@ -1,31 +1,27 @@
-// 门禁：散文契约 slop 扫描（verify-prose）。
-// 拒绝不变量（deep-standard 法则 5「散文只写契约，不写转录」的 slop 清单程序化）：
-// 常驻/规范文档（AGENTS.md、docs/*.md、decisions/README.md）出现：
-// - 规划语气（提案期词）："应该""待迁移""待办""尚未实现""TODO""FIXME"（已实施记录里尤其禁止）
-// - 历史叙述残留："之前""现在改为""不再""曾经"（写当前态；变更史归 commit/决策记录）
-// - 评审走查/实现叙述标记："测试走查""评审发现"
-// 只读、确定性。豁免：docs/architecture-evolution.md（设计演进文档，规划语气是正当的——
-// 它记录「未来方向」）；growth-system.md 的「未来方向」节同理用行级豁免。
+// Check resident and normative documentation for planning language, stale history,
+// and implementation/review transcripts rather than current contracts.
+// Read-only and deterministic. Architecture-evolution documentation is exempt;
+// legitimate future-direction sections can use line-level exemptions.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 
-/** 扫描范围（常驻/规范文档；排除决策记录——它们有自己的格式门禁）。 */
+/** Scan resident and normative documents; decision records have their own format gate. */
 const SCAN_FILES = ['AGENTS.md', 'README.md', 'docs/AGENTS.md', 'decisions/README.md']
 
-/** 规划语气 slop（提案期词出现在已实施/常驻文档即违规）。 */
+/** Planning-language patterns forbidden in implemented or resident documentation. */
 const PLANNING_RE = /(待迁移|待办|尚未实现|TODO|FIXME|验收标准|将来会|计划中)/
-/** 历史叙述 slop（写当前态；变更史属于 commit/决策记录）。 */
+/** Historical narration belongs in commits and decision records, not current contracts. */
 const HISTORY_RE = /(之前.*(?:是|为|用)|现在改为|不再(?:是|用|需要)|曾经(?:是|有))/
-/** 评审/实现叙述 slop。 */
+/** Review and implementation transcript patterns. */
 const NARRATIVE_RE = /(测试走查|评审发现|本次重构|本次修复|上一轮)/
 
-/** 豁免文件（设计演进文档正当使用规划语气；行级豁免用注释标记）。 */
+/** Files with legitimate design-evolution content; other exceptions use inline markers. */
 const EXEMPT_FILES = new Set(['docs/architecture-evolution.md', 'docs/growth-system.md'])
 
-/** 校验散文契约。返回 { ok, errors }。 */
+/** Validate prose contracts and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   for (const rel of SCAN_FILES) {
@@ -39,13 +35,12 @@ export function check(root = ROOT) {
     }
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
-      // 豁免 slop 清单上下文（反例教学：❌ 示例 / 「删除」「不写」的枚举）——
-      // 清单文档列出这些词是教人不要写，不是违规内容本身。
+      // Exempt examples that teach which wording to remove rather than using it as a contract.
       const isSlopExample = /❌|不写|删除|删掉|避免|禁止/.test(line)
       if (isSlopExample) continue
-      const stripped = line.replace(/<!--.*?-->/g, '') // 行内注释豁免标记
+      const stripped = line.replace(/<!--.*?-->/g, '') // Inline exemption marker.
       if (PLANNING_RE.test(line)) {
-        // 已实施记录禁规划语气；常驻文档若含 TODO/FIXME 即违规
+        // Implemented records forbid planning language; resident documents forbid unresolved work markers.
         errors.push(`${rel}:${i + 1}: 规划语气「${line.match(PLANNING_RE)[0]}」——写当前态，规划归提案/文档「未来方向」`)
       } else if (HISTORY_RE.test(line)) {
         errors.push(`${rel}:${i + 1}: 历史叙述「${line.match(HISTORY_RE)[0]}」——写当前态，变更史归 commit/决策记录`)
@@ -57,7 +52,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-prose] ${e}`)

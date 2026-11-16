@@ -1,8 +1,8 @@
-// src/assets.mjs 单测（node:test）。归属：路径净化/MIME 改动跑本文件。
+// Asset path-sanitization and MIME regression tests for src/core/assets.ts.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { sanitizeAssetPath, contentTypeFor } from '../lib/src/assets.mjs'
-import { ASSETS_PATH } from '../lib/src/routes.mjs'
+import { sanitizeAssetPath, contentTypeFor } from '../dist/core/assets.js'
+import { ASSETS_PATH } from '../dist/core/routes.js'
 
 test('合法相对路径通过', () => {
   assert.equal(sanitizeAssetPath(ASSETS_PATH + '/idle.png'), 'idle.png')

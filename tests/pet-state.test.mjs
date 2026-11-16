@@ -1,10 +1,10 @@
-// 积累账本单测（node:test，零依赖）。归属：src/pet-state.mjs 的行为改动跑本文件。
+// Pure cumulative pet-ledger regressions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   INITIAL_STATE, MEMORY_MAX, TASK_XP, SESSION_XP, RESUME_XP, xpForLevel, levelFor,
   recordTaskCompleted, recordFailure, recordSession, recordSessionResume, recordActive, ACTIVE_CAP_MS, titleName,
-} from '../lib/src/pet-state.mjs'
+} from '../dist/core/pet-state.js'
 
 const NOW = 1_700_000_000_000
 
@@ -31,10 +31,10 @@ test('xpForLevel 三角数列与 levelFor 互逆', () => {
 })
 
 test('levelFor 闭式解：巨量 xp 瞬时返回且与 xpForLevel 往返一致（原线性循环会挂起宿主）', () => {
-  const l = levelFor(1e14) // 封顶 XP_SAFE_MAX 内
+  const l = levelFor(1e14) // Clamp within XP_SAFE_MAX.
   assert.ok(xpForLevel(l) <= 1e14 && 1e14 < xpForLevel(l + 1))
-  assert.ok(Number.isFinite(levelFor(Number.MAX_VALUE))) // 溢出被内部上限吸收
-  assert.ok(levelFor(-5) >= 1) // 负值钳制
+  assert.ok(Number.isFinite(levelFor(Number.MAX_VALUE))) // Absorb overflow at the internal cap.
+  assert.ok(levelFor(-5) >= 1) // Clamp negative values.
 })
 
 test('recordTaskCompleted：+XP、记统计、写回忆、不可变', () => {
@@ -44,7 +44,7 @@ test('recordTaskCompleted：+XP、记统计、写回忆、不可变', () => {
   assert.equal(state.xp, TASK_XP)
   assert.equal(state.level, 1)
   assert.match(state.memory[0], /Задача «任务甲» выполнена \(№1\)/)
-  assert.equal(base.stats.tasksDone, 0) // 不可变
+  assert.equal(base.stats.tasksDone, 0) // The input remains immutable.
   assert.equal(state.updatedAt, NOW)
 })
 
@@ -99,15 +99,16 @@ test('recordSession：+XP、记首见时间', () => {
 test('recordSessionResume：+RESUME_XP、不计会话数、不记首见（续接 ≠ 新会话）', () => {
   const base = { ...INITIAL_STATE, updatedAt: 0, stats: { ...INITIAL_STATE.stats, sessions: 3, firstSeenAt: 100 } }
   const { state } = recordSessionResume(base, NOW)
-  assert.equal(state.stats.sessions, 3) // 计数不变
-  assert.equal(state.stats.firstSeenAt, 100) // 首见不变
+  assert.equal(state.stats.sessions, 3) // The count stays unchanged.
+  assert.equal(state.stats.firstSeenAt, 100) // The first observation stays unchanged.
   assert.equal(state.xp, RESUME_XP)
   assert.match(state.memory[0], /Вернулись в старую сессию/)
 })
 
 test('recordActive：活跃时长积累且称号「常驻伙伴」在 6h 解锁', () => {
   let s = { ...INITIAL_STATE, updatedAt: 0 }
-  // 6h 由 5min 封顶增量多次累加（单次封顶后无「睡眠一夜刷称号」路径）。
+  // Accumulate six hours through repeated five-minute-capped increments,
+  // preventing one overnight interval from unlocking an active-time title.
   for (let i = 0; i < 72; i++) s = recordActive(s, 5 * 60_000, NOW + i).state
   assert.equal(s.stats.activeMs, 6 * 3_600_000)
   assert.ok(s.titles.includes('regular'))
@@ -116,7 +117,7 @@ test('recordActive：活跃时长积累且称号「常驻伙伴」在 6h 解锁'
 test('recordActive：单次增量封顶 ACTIVE_CAP_MS（睡眠后首轮不一次计满）', () => {
   const s = recordActive({ ...INITIAL_STATE, updatedAt: 0 }, 6 * 3_600_000, NOW).state
   assert.equal(s.stats.activeMs, ACTIVE_CAP_MS)
-  assert.ok(!s.titles.includes('regular')) // 单次睡眠不计满 6h
+  assert.ok(!s.titles.includes('regular')) // One sleep interval must not credit six hours.
 })
 
 test('回忆环形上限 MEMORY_MAX', () => {

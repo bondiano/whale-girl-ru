@@ -7,7 +7,7 @@
 **贡献角色 = 产出 15 张素材 sheet + 1 段 manifest 条目，零代码改动。** 知识面最小化：
 
 - **必读（仅 1 份文档 + 1 张参考图）**：[sprites-spec.md](sprites-spec.md)（§状态总表：15 状态的帧数/画面/播放行为/朝向；§素材管线：切图工具与参数；§角色契约：5 项硬性要求）+ `originals/鲸鱼娘.png`（画风参考）。本文件 §二动作槽位（manifest 字段）与 §四动手步骤（具体命令）。
-- **必不读**：`lib/client/`、`lib/index.mjs`、`lib/src/` 及一切触发/优先级/播放器/热区实现——行为文法全角色共通（见下 §心智模型），素材自动跟随，无需理解代码。
+- **必不读**：`src/client/`、`src/index.ts`、`src/core/` 及一切触发/优先级/播放器/热区实现——行为文法全角色共通（见下 §心智模型），素材自动跟随，无需理解代码。
 - **本机前置**：`python3` + `Pillow` + `numpy`（切图工具 [slice-sheet.py](../scripts/slice-sheet.py) 的依赖）。
 - **验收**：`node scripts/gates/verify-assets.mjs`——门禁即契约的机器化，**通过即合格**，无需运行 DSH、无需看渲染效果（表现细节由素材决定）。
 - **改图约束**：已发布角色的 sheet 改图**必须改文件名或角色 id**——素材路由按 `immutable` 缓存，同名替换会滞留旧图（manifest 例外：client 以 `no-store` 每次页面加载重新拉取，见 [bug-fix/2026-08-20-manifest-cache-no-store.md](../decisions/implemented/bug-fix/2026-08-20-manifest-cache-no-store.md)）。
@@ -65,8 +65,8 @@
       "states": {               // ← 动作槽位表（全量映射——15 状态必须有 sheet）
         "idle":      { "sheet": "idle.png",      "frames": 3, "fps": 2,  "playback": "blink" },
         "working":   { "sheet": "working.png",   "frames": 3, "fps": 3,  "playback": "loop" },
-        // 必须填满 15 状态：celebrate/error/disappointed/joy/eat/play/drag/walk/sleep/wake/welcome/think/wait
-        // 单帧动作可加 motion 配方（bob/wiggle/squash/shake/sigh/hop/tilt/float/wave）
+        // Provide all 15 states: celebrate/error/disappointed/joy/eat/play/drag/walk/sleep/wake/welcome/think/wait
+        // Single-frame states may add motion: bob/wiggle/squash/shake/sigh/hop/tilt/float/wave
       }
     }
   },
@@ -103,7 +103,7 @@
 4. **改 XP/称号**（成长语义，见 growth-system.md 边界）
 
 ### ⚠️ 新动作（平台级）需要什么（4 步）
-1. `lib/client/logic.mjs` STATE_NAMES 加状态名 + STATE_TABLE 加行（含 when/resolve）
+1. `src/client/logic.ts` STATE_NAMES 加状态名 + STATE_TABLE 加行（含 when/resolve）
 2. `assets/manifest.json` 每个角色 states 加条目（**必填 sheet**）
 3. `docs/sprites-spec.md` 状态总表同步（门禁强制 spec↔STATE_NAMES↔STATE_TABLE）
 4. 决策记录（行为文法变更）
@@ -115,7 +115,7 @@
 3. **切图**（工具化，见 [sprites-spec.md](sprites-spec.md) 素材管线）：`python3 scripts/slice-sheet.py <图> <模式> --key R,G,B --out assets/characters/<角色id>/`——网格图用 `--sheet 3x3 --states <状态名> --frames <每行帧数>`，单状态/分栏用 `--single [--columns N --states a,b]`；`--swap-frames 0,2,1` 校正 AI 乱序帧；`--normalize-scale 0.88` 统一内容占比
 4. **投放**：sheet 进 `assets/characters/<id>/`；manifest 加 `characters.<id>`（含 meta + states）
 5. **验证**：`node scripts/gates/verify-assets.mjs`（文件存在/PNG 尺寸/帧序/motion/角色 id 合法性）；`node scripts/verify-client-smoke.mjs <web-url>` 浏览器冒烟
-6. **切换**：设置 localStorage `whale-girl:character` = 角色 id，或点菜单「🎭 换角色」按钮循环切换
+6. **切换**：设置 localStorage `whale-girl:character` = 角色 id，然后重新加载页面
 
 ## 五、验证门禁（角色必须通过）
 

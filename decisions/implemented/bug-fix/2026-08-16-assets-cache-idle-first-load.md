@@ -8,9 +8,9 @@ Status: implemented
 
 ## Decision
 
-- **素材路由 immutable 缓存**（`lib/index.mjs` assets 路由）：`cache-control` 由 `no-cache` 改为 `public, max-age=31536000, immutable`。素材路径含角色 id（`/assets/characters/<id>/…`）且随包分发，内容不可变——刷新零请求（实测暖刷新 PNG 总耗时 249ms → 11ms，transferSize 归零）。
+- **素材路由 immutable 缓存**（`src/index.ts` assets 路由）：`cache-control` 由 `no-cache` 改为 `public, max-age=31536000, immutable`。素材路径含角色 id（`/assets/characters/<id>/…`）且随包分发，内容不可变——刷新零请求（实测暖刷新 PNG 总耗时 249ms → 11ms，transferSize 归零）。
   - **发布契约**：改图必须改文件名或角色 id（immutable 会滞留「同名被替换」的旧图——替代原 no-cache 的重新校验防线）。契约写入 `docs/adding-a-character.md` 与路由注释。
-- **client idle 优先加载**（`lib/client/index.mjs` `loadAssets`）：由 `Promise.all` 全等改为「先 await idle 一张，其余状态后台 preload 不 await」——连接池饱和时 idle 最先发出/扫描，首帧尽快显示；无 idle 状态的角色退化为全并发。实测冷加载 PNG 总耗时 287ms → 136ms；宠物挂载时机取决于初始状态（会话活跃时初始为 think/wait，首帧等待的是那张 sheet——该场景收益来自缓存头而非 idle 优先）。
+- **client idle 优先加载**（`src/client/index.ts` `loadAssets`）：由 `Promise.all` 全等改为「先 await idle 一张，其余状态后台 preload 不 await」——连接池饱和时 idle 最先发出/扫描，首帧尽快显示；无 idle 状态的角色退化为全并发。实测冷加载 PNG 总耗时 287ms → 136ms；宠物挂载时机取决于初始状态（会话活跃时初始为 think/wait，首帧等待的是那张 sheet——该场景收益来自缓存头而非 idle 优先）。
 - 两个改动均与素材格式/清单契约无关（`verify-assets` 门禁不变）。
 
 ## Alternatives considered
@@ -30,4 +30,4 @@ Status: implemented
 - 暖刷新（缓存命中）：16 个素材请求零传输，PNG 总耗时 −95%；冷加载 PNG 总耗时 −52%。
 - 发布侧新增硬约束「改图必改文件名或角色 id」——违反则用户端滞留旧图直至缓存过期（365 天）。
 - manifest 例外：manifest 是可变索引（帧时序/角色 meta），client 以 `no-store` 每次页面加载重新拉取——见 [bug-fix/2026-08-20-manifest-cache-no-store.md](../bug-fix/2026-08-20-manifest-cache-no-store.md)。
-- 引用点：`lib/index.mjs`（assets 路由缓存头）、`lib/client/index.mjs`（loadAssets idle 优先）、`docs/adding-a-character.md`（改图约束）。
+- 引用点：`src/index.ts`（assets 路由缓存头）、`src/client/index.ts`（loadAssets idle 优先）、`docs/adding-a-character.md`（改图约束）。

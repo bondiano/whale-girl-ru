@@ -1,27 +1,21 @@
-// 门禁：docs/sprites-spec.md 状态总表与 client STATE_NAMES 权威集合一致。
-// 拒绝不变量：spec「状态总表（权威，N 状态）」声明数 ≠ 表格实际状态行数，
-// 或表格状态集合 ≠ client/logic.mjs 的 STATE_NAMES（双向——新增/改名状态
-// 必须同时改 spec 与 STATE_NAMES，任一漏改即红；防止文档漂移），
-// 或 STATE_TABLE 行的状态（含 burst 的 resolve 值）不在 STATE_NAMES（文法漂移），
-// 或 spec 状态总表的播放行为列 ≠ assets/manifest.json 每角色的 playback 值
-// （playback 语义级配错盲区：枚举合法但模式不符——idle 配 loop、walk 配 loop 等），
-// 或 docs/state-machine.md 优先级逐行列表的行序 ≠ STATE_TABLE 行序
-// （文档优先级是 STATE_TABLE 的行序家——单测不再拷贝 order 数组，此处机械守护）。
-// 只读、确定性。
+// Cross-check the sprite specification's declared count, state rows, STATE_NAMES,
+// STATE_TABLE including dynamic burst values, and each character's manifest playback.
+// The state-machine priority list must match STATE_TABLE row order.
+// This read-only deterministic check catches syntactically valid semantic drift.
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { STATE_NAMES, STATE_TABLE } from '../../lib/client/logic.mjs'
+import { STATE_NAMES, STATE_TABLE } from '../../dist/client/logic.js'
 
 const ROOT = resolve(import.meta.dirname, '../..')
-// 权威总表标题：`## 状态总表（权威，N 状态）`（N 由表格行数验证，防止手改标题数漂移）。
+// The authoritative state-table heading declares a count verified against its rows.
 const TITLE_RE = /^## 状态总表（权威，(\d+) 状态）$/
-// 表格状态行：`| \`name\` | 触发 | 帧数 | motion | \`playback\` | 画面 |`（表头/分隔行除外）。
+// Read state table rows; ignore headings and separators.
 const STATE_ROW_RE = /^\| `([a-z-]+)` \|.*\| `([a-z]+)` \|/
-// 优先级逐行列表行：`N. ...`（行内可含多个状态 token，如 `eat` / `play`；全角括号注释忽略）。
+// Priority list rows may contain multiple state tokens; ignore full-width parenthesized notes.
 const PRIORITY_ROW_RE = /^\d+\.\s+/
 
-/** 校验 spec 状态总表与 STATE_NAMES/STATE_TABLE/manifest playback 一致。返回 { ok, errors }。 */
+/** Validate specification states, priority order, and manifest playback; return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   const spec = join(root, 'docs', 'sprites-spec.md')
@@ -42,7 +36,7 @@ export function check(root = ROOT) {
       continue
     }
     if (inTable) {
-      if (line.startsWith('#')) break // 表格结束（下一标题，h2/h3 皆然——状态总表是第一个表）
+      if (line.startsWith('#')) break // The first table ends at the next h2 or h3 heading.
       const m = STATE_ROW_RE.exec(line)
       if (m !== null && !line.includes('---')) rows.push({ name: m[1], playback: m[2] })
     }
@@ -62,7 +56,7 @@ export function check(root = ROOT) {
   for (const name of specSet) {
     if (!nameSet.has(name)) errors.push(`spec 状态总表有 ${name}，client STATE_NAMES 缺（须同步 client/logic.mjs）`)
   }
-  // STATE_TABLE 文法漂移：行状态（含 burst resolve 的动态值）必须在权威集合内。
+  // Every row state, including dynamic burst resolutions, must belong to STATE_NAMES.
   for (const row of STATE_TABLE) {
     if (row.state !== 'burst' && !nameSet.has(row.state)) {
       errors.push(`STATE_TABLE 行状态 ${row.state} 不在 STATE_NAMES（新增状态须同步权威集合与 spec）`)
@@ -71,7 +65,7 @@ export function check(root = ROOT) {
   for (const dynamic of ['welcome', 'celebrate', 'error', 'disappointed']) {
     if (!nameSet.has(dynamic)) errors.push(`burst 动态解析值 ${dynamic} 不在 STATE_NAMES`)
   }
-  // spec 播放行为列 ↔ manifest playback 对照（语义级配错盲区拦截）。
+  // Cross-check documented playback semantics with each manifest entry.
   const manifestPath = join(root, 'lib', 'assets', 'manifest.json')
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
@@ -94,9 +88,9 @@ export function check(root = ROOT) {
       collect(manifest?.states, 'states')
     }
   } catch {
-    // manifest 不可读/不可解析：verify-assets 门禁负责报（此处跳过，不重复报）
+    // The asset gate owns unreadable or malformed manifests; avoid duplicate failures here.
   }
-  // 优先级列表 ↔ STATE_TABLE 行序（文档为行序家；单测不再拷贝 order 数组）。
+  // The documentation priority list must match STATE_TABLE row order.
   const docOrder = parsePriorityList(join(root, 'docs', 'state-machine.md'))
   if (docOrder === null) {
     errors.push('docs/state-machine.md 缺少「## 优先级」逐行列表（N. 行，verify-spec-states 机械校验行序）')
@@ -109,7 +103,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-/** 解析 docs/state-machine.md 优先级逐行列表 → 状态 token 序列；缺列表返回 null。 */
+/** Parse priority-list state tokens; return null if the list is missing. */
 export function parsePriorityList(file) {
   let lines
   try {
@@ -124,8 +118,8 @@ export function parsePriorityList(file) {
     if (inList) {
       if (line.startsWith('## ')) break
       if (PRIORITY_ROW_RE.test(line)) {
-        // 剥离全角括号注释（burst 行内展开的 4 状态不算顶层 token），取行内全部反引号 token
-        // （`eat` / `play` 一行即两个连续行——文档行序 token 序列须等于 STATE_TABLE 行序）。
+        // Remove full-width parenthesized notes, then collect all backtick-delimited tokens.
+        // A combined eat/play list row represents two consecutive STATE_TABLE rows.
         const withoutNotes = line.replace(/（[^）]*）/g, '')
         const tokens = [...withoutNotes.matchAll(/`([a-z-]+)`/g)].map((m) => m[1])
         if (tokens.length > 0) order.push(...tokens)
@@ -135,7 +129,7 @@ export function parsePriorityList(file) {
   return order.length > 0 ? order : null
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-spec-states] ${e}`)

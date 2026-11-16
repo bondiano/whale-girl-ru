@@ -1,15 +1,12 @@
-// 门禁编排器：门禁清单的唯一归属（AGENTS.md 与文档不手抄门禁列表，只链接本文件）。
-// 用法：
-//   node scripts/gates/run.mjs               # 本地精选组
-//   node scripts/gates/run.mjs --group ci    # CI 全量组
-//   node scripts/gates/run.mjs <gate-name>   # 单独跑一个门禁
-// 失败聚合：收集全部失败后统一报告，不首个失败即中止。
+// Single authoritative gate registry; documentation links here rather than copying the list.
+// Usage: node scripts/gates/run.mjs [--group local|ci] or <gate-name>.
+// Run every selected gate and report all failures together.
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 
-/** 门禁清单（权威）。group: local = 本地精选组；ci = CI 全量组（含 local）。 */
+/** Authoritative gates: local is the selected developer set; ci includes local and exhaustive checks. */
 const GATES = [
   { name: 'verify-md-links', group: 'local', args: ['scripts/gates/verify-md-links.mjs'] },
   { name: 'verify-decisions', group: 'local', args: ['scripts/gates/verify-decisions.mjs'] },

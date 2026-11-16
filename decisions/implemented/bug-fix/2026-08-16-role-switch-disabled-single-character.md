@@ -29,4 +29,4 @@ Status: implemented
 
 - 单角色（当前唯一发布形态）下按钮恒置灰 + 悬停提示「暂无其他角色」，不再静默无反馈。
 - 多角色（manifest 后续扩展）自动恢复可点；`syncRoleBtnState` 在 manifest 解析后刷新，无时序窗口。
-- 引用点：`lib/client/index.mjs`（`syncRoleBtnState` 定义 + 初始化调用 + `loadAssets` 内调用、click 兜底保留）。
+- 引用点：`src/client/index.ts`（`syncRoleBtnState` 定义 + 初始化调用 + `loadAssets` 内调用、click 兜底保留）。

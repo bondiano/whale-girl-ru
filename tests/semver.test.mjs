@@ -1,7 +1,7 @@
-// semver 形状比较单测（node:test，零依赖）。归属：lib/src/semver.mjs 的行为改动跑本文件。
+// Pure semantic-version shape comparison regressions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareVersions } from '../lib/src/semver.mjs'
+import { compareVersions } from '../dist/core/semver.js'
 
 test('compareVersions：数字段与预发布段', () => {
   assert.equal(compareVersions('1.0.0', '1.0.1'), -1)

@@ -33,4 +33,4 @@ Status: implemented
 
 - 会话活跃时 working 插曲按 12-30s 随机间隔出现（2.5-6s），不再被 3s 轮询推后；会话结束撤防不变。
 - 纯函数/行条件/单测零改动；仅宿主 `armWorking` 加守卫。
-- 引用点：`lib/client/index.mjs`（`armWorking` 守卫 + refresh 挂钩注释）；构建产物 `lib/client.js` 同步重建。
+- 引用点：`src/client/index.ts`（`armWorking` 守卫 + refresh 挂钩注释）；构建产物 `lib/client.js` 同步重建。

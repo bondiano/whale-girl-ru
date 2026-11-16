@@ -1,11 +1,10 @@
-// Новости: чистый разбор RSS/Atom, отбор свежих заголовков и кэш.
-//归属 lib/src/news.mjs：меняется парсер/сеть/кэш — правь этот файл.
+// News regressions cover RSS/Atom parsing, recency selection, networking, and caching.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   NEWS_CACHE_MS, NEWS_TITLE_MAX, decodeEntities, fetchHeadlines, formatHeadlines,
   parseFeed, resetNewsCache, stripMarkup, wantsNews,
-} from '../lib/src/news.mjs'
+} from '../dist/core/news.js'
 
 const RSS = `<?xml version="1.0"?><rss><channel>
 <item><title><![CDATA[Первая <b>новость</b>]]></title><link>https://a/1</link><pubDate>Mon, 16 Nov 2026 10:00:00 GMT</pubDate></item>

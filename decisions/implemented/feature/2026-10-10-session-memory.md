@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-**自建本机会话记忆，不依赖宿主记录接口**。新增 `lib/src/session-memory.mjs`（纯逻辑，零宿主依赖）与独立文件 `<dshHome>/data/whale-girl/sessions.json`（与账本 `state.json` 分离——开关只停记忆，不动账本）：
+**自建本机会话记忆，不依赖宿主记录接口**。新增 `src/core/session-memory.ts`（纯逻辑，零宿主依赖）与独立文件 `<dshHome>/data/whale-girl/sessions.json`（与账本 `state.json` 分离——开关只停记忆，不动账本）：
 
 - **存储形状**：`{ sessions: { [sessionId]: { parent?, title?, subagent?, at, tasks[] } } }`。任务条目 `{ label, ok, at }`，标签 160 字、每会话 8 条，全部越界裁剪；会话数分两套预算——最近 64 个**用户**会话 + 16 个 subagent 子会话，各自按 `at` 淘汰（子会话永不播报回读，一次密集委派 spawn 出的几十个子会话不得把用户自己的会话挤出账本）；`normalizeSessionMemory` 逐字段容错，损坏即回空账本（记忆可丢，只影响气泡文案）。
 - **血缘回读**：fork 的子会话在宿主会话头里带 `parentSession`（DSH 会话头字段，观测时登记进 `parent` 链），`memoryFor` 沿链找最近一条有任务记录的会话（最大 8 跳、防环、链断即 null 不猜）——「分支也记得上次做了什么」由此而来，无需宿主记录接口。子会话的任务与血缘同样入账，所以 fork 一个子会话仍能读到它做过什么。

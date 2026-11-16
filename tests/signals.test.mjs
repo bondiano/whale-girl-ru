@@ -1,7 +1,7 @@
-// src/signals.mjs 单测（node:test）。归属：pet 服务信号器改动跑本文件。
+// Pet-service signal subscription regressions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createSignals } from '../lib/src/signals.mjs'
+import { createSignals } from '../dist/core/signals.js'
 
 test('订阅收到信号与 payload', () => {
   const s = createSignals()

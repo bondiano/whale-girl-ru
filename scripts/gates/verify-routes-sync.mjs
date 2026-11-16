@@ -1,39 +1,36 @@
-// 门禁：路由前缀单一来源（verify-routes-sync）。
-// 拒绝不变量：client/index.mjs、index.mjs、src/assets.mjs 任一**手写** ROUTE_PREFIX
-// 字面量（从 src/routes.mjs 读取当前前缀——改前缀自动跟随，不再硬编码 '/plugins/'），
-// 或未从 src/routes.mjs import 端点常量（路由前缀只能有一个权威——改前缀只改
-// routes.mjs，散落字面量断端点且改名/迁移时漏改即红）。
-// 只读、确定性。
+// Keep route constants in one authoritative core routes module.
+// Reject handwritten route-prefix literals or missing route imports in the client,
+// settings card, server entry, and asset handler. Read-only and deterministic.
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const ROOT = resolve(import.meta.dirname, '../..')
-// 从 routes.mjs 导入的语句（相对路径形式多样，只校验来源模块名）。
-const IMPORT_RE = /from\s+['"][^'"]*routes\.mjs['"]/
+// Match the routes module name independently of its relative import path.
+const IMPORT_RE = /from\s+['"][^'"]*routes\.js['"]/
 
-/** 提取 routes.mjs 的 ROUTE_PREFIX 值；缺失返回 null。 */
+/** Extract ROUTE_PREFIX from its source; return null when absent. */
 function readPrefix(routesSrc) {
   const m = /ROUTE_PREFIX\s*=\s*['"]([^'"]+)['"]/.exec(routesSrc)
   return m === null ? null : m[1]
 }
 
-/** 校验路由单一来源。返回 { ok, errors }。 */
+/** Validate the single route source and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   const consumers = [
-    { file: 'lib/client/index.mjs', label: 'client/index.mjs' },
-    { file: 'lib/client/settings-card.mjs', label: 'client/settings-card.mjs' },
-    { file: 'lib/index.mjs', label: 'index.mjs' },
-    { file: 'lib/src/assets.mjs', label: 'src/assets.mjs' },
+    { file: 'src/client/index.ts', label: 'client/index.mjs' },
+    { file: 'src/client/settings-card.ts', label: 'client/settings-card.mjs' },
+    { file: 'src/index.ts', label: 'index.mjs' },
+    { file: 'src/core/assets.ts', label: 'src/assets.mjs' },
   ]
-  const routesSrc = readFileSync(join(root, 'lib', 'src', 'routes.mjs'), 'utf8')
+  const routesSrc = readFileSync(join(root, 'src', 'core', 'routes.ts'), 'utf8')
   const prefix = readPrefix(routesSrc)
   if (prefix === null) {
-    errors.push('lib/src/routes.mjs 未定义 ROUTE_PREFIX（路由单一来源缺失）')
+    errors.push('src/core/routes.ts 未定义 ROUTE_PREFIX（路由单一来源缺失）')
     return { ok: false, errors }
   }
-  // 路由前缀字面量（引号包住的 ROUTE_PREFIX 路径）——routes.mjs 内部允许，消费文件禁止。
+  // Route-prefix literals belong only in the authoritative routes module.
   const literalRe = new RegExp(`['"]${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
   for (const { file, label } of consumers) {
     const src = readFileSync(join(root, file), 'utf8')
@@ -47,7 +44,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-routes-sync] ${e}`)

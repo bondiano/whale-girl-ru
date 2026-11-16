@@ -36,4 +36,4 @@ Status: implemented
 
 - wake（2 帧 once）完整播放帧 0 → 帧 1；所有多帧状态进入时首帧可见（idle 从睁眼帧 0 起播，不再从帧 1 切入）。
 - 帧推进节奏不变（仍按 fps 节流）；blink 分支不受影响（其推进独立于该时序，常态帧 0 语义由 blink 分支自身维护）。
-- 引用点：`lib/client/index.mjs`（`setState` / tick 换肤路径 / `switchCharacter` 的 `lastFrameAt` 赋值）；构建产物 `lib/client.js` 同步重建。
+- 引用点：`src/client/index.ts`（`setState` / tick 换肤路径 / `switchCharacter` 的 `lastFrameAt` 赋值）；构建产物 `lib/client.js` 同步重建。

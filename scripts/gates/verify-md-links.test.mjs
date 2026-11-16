@@ -1,5 +1,4 @@
-// 门禁自证：verify-md-links 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Markdown-link gate regressions prove broken references are rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'

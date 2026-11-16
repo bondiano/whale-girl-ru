@@ -1,10 +1,10 @@
-// Беседа (src/chat.mjs) — чистые функции: нормализация реплик, история, характер.
+// Pure chat tests cover text normalization, history, and persona assembly.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  CHAT_HISTORY_MAX, CHAT_PERSONA, CHAT_REPLY_MAX, CHAT_TEXT_MAX,
+  CHAT_EMOJI_STYLE, CHAT_HISTORY_MAX, CHAT_PERSONA, CHAT_REPLY_MAX, CHAT_TEXT_MAX,
   appendHistory, bubbleText, buildChatMessages, fallbackReply, normalizeChatText, normalizeReply, personaFor, speechText,
-} from '../lib/src/chat.mjs'
+} from '../dist/core/chat.js'
 
 test('normalizeChatText: схлопывает пробелы, обрезает, пустое → null', () => {
   assert.equal(normalizeChatText('  привет \n мир  '), 'привет мир')
@@ -125,4 +125,13 @@ test('personaFor: контекст сессии и новости попадаю
   assert.match(news, /2–3 новости/)
   const down = personaFor({}, '', { newsUnavailable: true })
   assert.match(down, /недоступны/)
+})
+
+
+test('pet replies request a small number of emojis with built-in and custom personas', () => {
+  assert.match(CHAT_EMOJI_STYLE, /1–2/)
+  assert.match(CHAT_EMOJI_STYLE, /Не ставь эмодзи в каждую фразу/)
+  assert.ok(personaFor(null).includes(CHAT_EMOJI_STYLE))
+  assert.ok(personaFor(null, 'Говори как пират').includes(CHAT_EMOJI_STYLE))
+  assert.equal(speechText('Всё идёт хорошо 🐳✨'), 'Всё идёт хорошо')
 })

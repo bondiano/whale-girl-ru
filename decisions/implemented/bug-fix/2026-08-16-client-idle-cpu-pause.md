@@ -36,4 +36,4 @@ Status: implemented
 - 后台标签页：轮询与 tick 定时器完全停止，CPU 归零（实测 30s CPU 增量 0）。
 - 前台空闲页面：检查频率 50ms→200ms，累计 CPU 从实测均值约 14.6% 降至约 2%（新进程 30 分钟累计 1 分 11 秒 CPU），动画与交互无感知变化。
 - 行为契约不变：回前台立即刷新状态；SSE 事件即时性不受影响；config 热更新（pollMs/尺寸/透明度/游走）语义不变。
-- 引用点：`lib/client/index.mjs`（CFG 区 TICK_MS、applyClientConfig、onVisibility）。
+- 引用点：`src/client/index.ts`（CFG 区 TICK_MS、applyClientConfig、onVisibility）。

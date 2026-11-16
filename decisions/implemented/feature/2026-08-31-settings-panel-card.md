@@ -82,9 +82,9 @@ external）；settings 命名空间注册/校验/热更新/写面信任边界归
 - GUI 用户可配置高频体验项与回话文案池，改动即时生效（live 热更新 Node half 已实现，
   /state configRevision 下发客户端无需重启）；README 的 "(or the settings UI)" 表述
   变为真实。
-- 新增模块：`lib/client/settings-card.mjs`（React 卡片 + zh/en locale + 注册函数）与
-  `lib/client/settings-fields.mjs`（纯逻辑，零 React/零宿主依赖，单测 13 例；本记录早期的
-  `settings-form.mjs` 随暂存模型一起删除，见 direct-write 记录）；`lib/client/index.mjs`
+- 新增模块：`src/client/settings-card.ts`（React 卡片 + zh/en locale + 注册函数）与
+  `src/client/settings-fields.ts`（纯逻辑，零 React/零宿主依赖，单测 13 例；本记录早期的
+  `settings-form.mjs` 随暂存模型一起删除，见 direct-write 记录）；`src/client/index.ts`
   声明 `inject = ['slots','locale','configForms']` 与守卫注册；`scripts/build-client.mjs`
   以 `--external:react`（及 client primitives）产出 bundle。
 - 实现细节：卡片 key（= bundle 包名 = 设置命名空间）在 client 以字面量 `SETTINGS_NAMESPACE`

@@ -37,4 +37,4 @@ failed to apply loader entry whale-girl (whale-girl): service "pet" has been reg
 - 服务名改为 `'whale-girl.pet'`；第三方插件 `inject: ['whale-girl.pet']` 消费，与 `remote.commands` 等 DSH 生态命名对齐。
 - 无已知消费方（外部消费者经 HTTP 端点，不经 cordis 服务），改名零破坏。
 - 与 `dsh-web-ui-all` 同装不再因 `'pet'` 撞名崩溃；`agent-presets` 重复属对方插件问题。
-- 代码引用点：`lib/index.mjs` 的 `ctx.provide`；文档引用点：AGENTS.md、docs/architecture-evolution.md、pet-service-openness.md、remove-agent-tools.md。
+- 代码引用点：`src/index.ts` 的 `ctx.provide`；文档引用点：AGENTS.md、docs/architecture-evolution.md、pet-service-openness.md、remove-agent-tools.md。

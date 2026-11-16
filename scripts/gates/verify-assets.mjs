@@ -1,44 +1,38 @@
-// 门禁：assets manifest 引用一致性。
-// 拒绝不变量：assets/manifest.json 里每个角色必须含全部 15 状态（缺一个即拒——
-// 素材必须全量提供，不再 emoji 降级）；每个 state 的 sheet 引用的文件必须真实存在、
-// 扩展名在 MIME 白名单内（与 src/assets.mjs 一致）、frames/fps 字段合法、
-// playback 播放模式在封闭枚举内且帧数满足该模式的下限（loop≥1/pingpong≥2/once≥1/
-// blink≥2——播放器按 playback 数据驱动推进，不再按状态名特判）、
-// motion 配方（若声明）在白名单内且 frames 必须为 1（帧播放器与运动配方互斥；
-// 定向例外：error 是唯一允许多帧+运动叠加的状态——2 帧「正常→惊吓」播完僵住，
-// 叠加 shake 让 burst 窗口内持续颤抖不静止，见 decisions 动画编排修订记录）、
-// PNG 多帧 sheet 必须满足宽度 = frames × 高度（横排帧图契约——单姿势图配 frames>1
-// 会把姿势劈成两半）、且状态名必须在 client STATE_NAMES 权威集合内。
-// 只读、确定性。
+// Validate the asset manifest deterministically without writes.
+// Every character must provide all 15 known states, existing allowed sheet files,
+// valid frame counts/fps, and playback with loop>=1, pingpong>=2, once>=1, blink>=2.
+// Motion recipes normally require one frame; error alone permits multi-frame shake.
+// Multi-frame PNG sheets must have width = frames * height.
+// State names must belong to the client's authoritative STATE_NAMES set.
 import { readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES } from '../../lib/client/logic.mjs'
-import { ROLE_ID_RE } from '../../lib/client/character.mjs'
+import { STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES } from '../../dist/client/logic.js'
+import { ROLE_ID_RE } from '../../dist/client/character.js'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 
-/** 与 src/assets.mjs 的 MIME 表一致的扩展名白名单。 */
+/** Allowed extensions match the core asset MIME table. */
 const ALLOWED_EXT = ['.png', '.svg', '.webp', '.jpg', '.jpeg', '.gif', '.json']
 
-/** 与 client/index.mjs 的 pet-motion-* 类一致的运动配方白名单。 */
+/** Allowed motion recipes match client pet-motion-* classes. */
 export const MOTION_WHITELIST = ['bob', 'wiggle', 'squash', 'shake', 'sigh', 'hop', 'tilt', 'float', 'wave']
 
-/** 定向例外：允许多帧+运动叠加的状态（默认互斥；error 2帧+shake 见决策记录）。 */
+/** Only these states allow multi-frame sheets combined with motion; error uses two frames plus shake. */
 export const MOTION_MULTIFRAME_ALLOWED = new Set(['error'])
 
-/** 读 PNG 的 IHDR 宽高（无依赖）；非 PNG 返回 null。 */
+/** Read PNG IHDR dimensions without dependencies; return null for other formats. */
 function pngSize(file) {
   const buf = readFileSync(file)
   if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) return null
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }
 }
 
-/** 校验一个角色的 states（sheet 文件在 assets/characters/<id>/ 下）。 */
+/** Validate one character's states; sheets live under assets/characters/<id>/. */
 function checkStates(states, roleId, errors, root) {
   const dir = roleId === null ? join(root, 'lib', 'assets') : join(root, 'lib', 'assets', 'characters', roleId)
   const label = roleId === null ? 'states' : `characters.${roleId}.states`
-  // 必备集：全部 15 状态必须声明（素材全量契约——不再 emoji 降级）。
+  // Require all 15 states; missing artwork cannot fall back to emoji.
   const declared = new Set(Object.keys(states))
   for (const name of STATE_NAMES) {
     if (!declared.has(name)) {
@@ -66,15 +60,15 @@ function checkStates(states, roleId, errors, root) {
     }
     if (!Number.isInteger(cfg.frames) || cfg.frames < 1) errors.push(`${label}.${name}: frames 必须是正整数`)
     if (typeof cfg.fps !== 'number' || cfg.fps <= 0) errors.push(`${label}.${name}: fps 必须是正数`)
-    // 逐帧停留时长（frameMs，可选）：正数数组、长度 === frames——帧 i 停留 frameMs[i] ms，
-    // 缺省回退统一 fps 节拍（首帧稍长/后续稍短的缓动由 manifest 数据表达）。
+    // Optional frameMs must contain one positive duration per frame.
+    // Without it, playback uses the uniform fps interval.
     if (cfg.frameMs !== undefined) {
       if (!Array.isArray(cfg.frameMs) || cfg.frameMs.length !== cfg.frames
         || !cfg.frameMs.every((ms) => typeof ms === 'number' && Number.isFinite(ms) && ms > 0)) {
         errors.push(`${label}.${name}: frameMs 必须是正数数组且长度 === frames（逐帧停留 ms；缺省回退 fps 节拍）`)
       }
     }
-    // 播放模式（v5）：playback 枚举 + 帧数交叉校验（取代 loop 布尔——播放器按此推进帧）。
+    // Cross-check playback mode and its minimum frame count.
     if (!PLAYBACK_MODES.includes(cfg.playback)) {
       errors.push(`${label}.${name}: playback "${cfg.playback}" 不在 ${PLAYBACK_MODES.join('/')}`)
     } else if (cfg.frames < PLAYBACK_MIN_FRAMES[cfg.playback]) {
@@ -88,8 +82,8 @@ function checkStates(states, roleId, errors, root) {
         errors.push(`${label}.${name}: motion 配方要求 frames === 1（帧播放器与运动配方互斥；仅 ${[...MOTION_MULTIFRAME_ALLOWED].join('/')} 定向例外）`)
       }
     }
-    // PNG 多帧契约：宽度 = frames × 高度（横排、帧等宽同高）。
-    // 单姿势 256×256 图配 frames:2 → 256 ≠ 512 → 拒绝（帧播放器会把姿势劈成两半）。
+    // Multi-frame PNG sheets use equally sized square frames in one horizontal row.
+    // A 256x256 image with frames:2 is invalid because the player would split one pose.
     if (cfg.frames > 1 && cfg.sheet.toLowerCase().endsWith('.png')) {
       try {
         const size = pngSize(file)
@@ -97,13 +91,13 @@ function checkStates(states, roleId, errors, root) {
           errors.push(`${label}.${name}: frames ${cfg.frames} 要求 PNG 宽度 = ${cfg.frames} × 高度（当前 ${size.w}×${size.h}——单姿势图勿配 frames>1）`)
         }
       } catch {
-        // 文件不可读（statSync 已报错）：跳过尺寸校验
+        // statSync already reported an unreadable file; skip its dimension check.
       }
     }
   }
 }
 
-/** 校验 assets manifest。返回 { ok, errors }。 */
+/** Validate the asset manifest and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   const manifestPath = join(root, 'lib', 'assets', 'manifest.json')
@@ -116,8 +110,7 @@ export function check(root = ROOT) {
   if (manifest === null || typeof manifest !== 'object') {
     return { ok: false, errors: ['lib/assets/manifest.json 必须是对象'] }
   }
-  // 角色索引（characters）优先；顶层 states（旧格式）若并存也校验——两种格式都校验，
-  // 防止「characters 存在时顶层遗留块无人管」的死数据盲区。
+  // Validate characters and any coexisting legacy top-level states; neither format may hide stale data.
   const hasCharacters = manifest.characters !== undefined
   if (hasCharacters) {
     if (manifest.characters === null || typeof manifest.characters !== 'object' || Array.isArray(manifest.characters)) {
@@ -143,7 +136,7 @@ export function check(root = ROOT) {
         errors.push(`default "${String(manifest.default)}" 必须指向 characters 中存在的角色`)
       }
     }
-    // 并存校验：顶层 states 若存在（旧格式兼容块），按平铺目录同样校验——不允许死数据逃过门禁。
+    // Validate coexisting legacy states against the flat asset directory too.
     if (manifest.states !== undefined) {
       if (manifest.states === null || typeof manifest.states !== 'object' || Array.isArray(manifest.states)) {
         errors.push('lib/assets/manifest.json 的顶层 states（兼容块）必须是对象')
@@ -160,7 +153,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-assets] ${e}`)

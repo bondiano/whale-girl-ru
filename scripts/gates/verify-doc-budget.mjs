@@ -1,7 +1,5 @@
-// 门禁：常驻文件字数上限（verify-doc-budget）。
-// 拒绝不变量：常驻规则文件的字符数超过声明上限——「字数上限是强制机制而非建议」
-// （deep-standard 法则 1：常驻文件必须受门禁守护，红了以后搬迁→压缩→才抬阈值）。
-// 只读、确定性。
+// Enforce resident documentation character budgets deterministically without writes.
+// When a budget fails, move or compress material before considering a justified limit change.
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,18 +7,18 @@ import { pathToFileURL } from 'node:url'
 const ROOT = resolve(import.meta.dirname, '../..')
 
 /**
- * 常驻文件字数上限（字符数，含换行）。上限是护栏不是压缩目标：至少保留 5% 余量。
- * 提升上限须作为独立有理由的决定（deep-standard 反模式：为变绿而放宽门禁）。
+ * Resident-file budgets count characters including newlines.
+ * Keep at least 5% headroom; raising a limit requires an independent rationale.
  */
 export const BUDGETS = {
-  'AGENTS.md': 6000,          // 根常驻：L2 核心规则
-  'docs/AGENTS.md': 2200,     // 文档标准
-  'decisions/README.md': 5500, // 决策记录契约
-  'README.md': 19000,         // 产品入口（俄语主文件：RU-документация беседы/голоса;上限 с ≥5% запасом）
-  'README.zh.md': 6500,       // 产品入口中文版（沿用原 README 上限；CJK 码元数 ≈ 字节/3）
+  'AGENTS.md': 6000,          // Root resident operating rules.
+  'docs/AGENTS.md': 2200,     // Documentation standards.
+  'decisions/README.md': 5500, // Decision-record contract.
+  'README.md': 19000,         // Russian product entry, including chat and voice documentation; retain at least 5% headroom.
+  'README.zh.md': 6500,       // Chinese product entry; retain the established character budget.
 }
 
-/** 校验常驻文件字数。返回 { ok, errors }。 */
+/** Validate resident-file character budgets and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   for (const [rel, limit] of Object.entries(BUDGETS)) {
@@ -39,7 +37,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-doc-budget] ${e}`)

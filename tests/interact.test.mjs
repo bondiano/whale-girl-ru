@@ -1,11 +1,43 @@
-// /interact 纯逻辑单测（node:test）。归属：src/interact.mjs 的行为改动跑本文件。
-// v2：投喂/玩耍是纯乐趣互动——状态不变，只回话（零负反馈，无数值影响）。
+// Pure interaction regressions: feeding/playing return replies without changing
+// the ledger or introducing negative-feedback state.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyAction, isCrossOrigin } from '../lib/src/interact.mjs'
-import { INITIAL_STATE } from '../lib/src/pet-state.mjs'
+import { applyAction, isCrossOrigin } from '../dist/core/interact.js'
+import { INITIAL_STATE } from '../dist/core/pet-state.js'
+import { DEFAULTS } from '../dist/core/config.js'
 
 const base = { ...INITIAL_STATE, updatedAt: 0 }
+
+test('default interaction replies offer concise work, programming and AI prompts', () => {
+  for (const action of ['feed', 'play']) {
+    const pool = DEFAULTS.replies[action]
+    assert.ok(pool.length >= 8)
+    assert.ok(pool.some(reply => /AI/.test(reply)), `${action}: includes an AI prompt`)
+    for (const reply of pool) {
+      assert.match(reply, /задач|код|баг|AI|тест|функци|diff|результат|рефактор|отлад|правк/i)
+      assert.ok(Array.from(reply).length <= 180, `${action}: concise reply`)
+      assert.ok((reply.match(/\p{Extended_Pictographic}/gu) ?? []).length <= 1)
+    }
+  }
+})
+
+test('missing and empty interaction pools use the same authoritative work replies', (t) => {
+  const random = t.mock.method(Math, 'random', () => 0)
+  const snapshot = structuredClone(base)
+  for (const action of ['feed', 'play']) {
+    const pool = DEFAULTS.replies[action]
+    for (let index = 0; index < pool.length; index++) {
+      random.mock.mockImplementation(() => (index + 0.5) / pool.length)
+      for (const replies of [null, undefined, { feed: [], play: [] }]) {
+        const result = applyAction(base, action, replies)
+        assert.equal(result.status, 200)
+        assert.equal(result.body.pet, base)
+        assert.equal(result.body.reply, pool[index])
+      }
+    }
+  }
+  assert.deepEqual(base, snapshot)
+})
 
 test('applyAction: feed 返回 200 + 回话，状态不变', () => {
   const r = applyAction(base, 'feed')

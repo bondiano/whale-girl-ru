@@ -4,7 +4,7 @@ import {
   SNAPSHOT_API_VERSION,
   TURN_COMPLETED_MS,
   turnCompletionSnapshot,
-} from '../lib/src/snapshot.mjs'
+} from '../dist/core/snapshot.js'
 
 test('snapshot contract has an explicit initial version', () => {
   assert.equal(SNAPSHOT_API_VERSION, 1)

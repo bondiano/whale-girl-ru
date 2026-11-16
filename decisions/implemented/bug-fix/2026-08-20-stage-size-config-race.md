@@ -38,4 +38,4 @@ issue #12：设置 `whale-girl.size`（如 160）后，每次重启 `dsh web` / 
 - 用户配置 size 后重启/刷新不再出现 110→160 跳变（首帧即按配置尺寸渲染；host 在 boot 的 applyClientConfig 之后才显示，配置在首帧前已就绪）。
 - 未配置 size 时行为不变：stageSize 作为默认（当前单角色 110px；多角色扩展后各角色差异化默认保留）。
 - boot 的 /config 拉取失败（瞬态）时仍可能先显示默认再跳变——那是「配置尚未到达」的正确降级，不是本竞态。
-- 引用点：`lib/client/index.mjs`（`sizeConfigured` 声明、`applyClientConfig` 置位、`loadAssets`/`switchCharacter` 守卫）；构建产物 `lib/client.js` 同步重建。
+- 引用点：`src/client/index.ts`（`sizeConfigured` 声明、`applyClientConfig` 置位、`loadAssets`/`switchCharacter` 守卫）；构建产物 `lib/client.js` 同步重建。

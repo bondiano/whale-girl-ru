@@ -26,7 +26,7 @@ Status: implemented
 - **横向：越界即平移回视口内**（左右各留 8px）。位移用 `left: calc(50% ± Npx)` 表达而**不用
   `transform`**——气泡入场动画的关键帧占用了 `transform`，用 transform 会被动画覆盖。浮层比视口
   还宽时退化为「以视口居中」。
-- **几何抽成纯函数 `lib/client/overlay-placement.mjs`（`planOverlay`），并配单测
+- **几何抽成纯函数 `src/client/overlay-placement.ts`（`planOverlay`），并配单测
   `tests/overlay-placement.test.mjs`（10 个用例）**。理由：这段是符号敏感的数值计算，而宿主是
   Electron 应用、无法在开发环境目视验证；把几何与 DOM 写入分离后，翻面判定与平移量可以逐值断言
   （贴左/贴右/贴顶/贴底/两侧都不足/超宽/尺寸未测到）。

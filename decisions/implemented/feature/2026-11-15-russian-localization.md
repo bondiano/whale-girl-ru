@@ -10,10 +10,10 @@ Status: implemented
 
 Форк [vlln/whale-girl](https://github.com/vlln/whale-girl) → [bondiano/whale-girl-ru](https://github.com/bondiano/whale-girl-ru); переводится только пользовательская поверхность, идентичность плагина сохраняется (`package.json` name `whale-girl`, запись в `cordis.patch.yml`, `NAMESPACE`, `SETTINGS_NAMESPACE` — гейт `verify-config-sync` держит их равенство):
 
-- **client half** (`lib/client/index.mjs`): aria-подписи, кнопки меню (🍗 Покормить / 🎾 Поиграть / 🎭 Сменить), подсказка одного персонажа, строка статуса (`Задач: N · провалов: M`, `Звание «…»`), маркер офлайна, консольные предупреждения.
-- **Карточка настроек** (`lib/client/settings-card.mjs`): полный словарь `ru` в `ctx.locale.register(SETTINGS_NS, { zh, en, ru })` — базовые `zh`/`en` сохранены (контракт локали требует оба), русский добавляется как дополнительный; активный язык хоста `ru` берёт его.
-- **Node half**: звания (`lib/src/pet-state.mjs`), записи воспоминаний (выполнение/провал/новая сессия/возврат/уровень), встроенные пулы фраз (`lib/src/config.mjs` + фолбэк `lib/src/interact.mjs`), метка задачи без названия (`lib/index.mjs`), имя персонажа в `lib/assets/manifest.json`.
-- **Текст питомца** (`lib/client/logic.mjs`): `memoryLine` — русские фразы, кавычки-ёлочки, обрезка подписи 16 символов и итог «всего N».
+- **client half** (`src/client/index.ts`): aria-подписи, кнопки меню (🍗 Покормить / 🎾 Поиграть / 🎭 Сменить), подсказка одного персонажа, строка статуса (`Задач: N · провалов: M`, `Звание «…»`), маркер офлайна, консольные предупреждения.
+- **Карточка настроек** (`src/client/settings-card.ts`): полный словарь `ru` в `ctx.locale.register(SETTINGS_NS, { zh, en, ru })` — базовые `zh`/`en` сохранены (контракт локали требует оба), русский добавляется как дополнительный; активный язык хоста `ru` берёт его.
+- **Node half**: звания (`src/core/pet-state.ts`), записи воспоминаний (выполнение/провал/новая сессия/возврат/уровень), встроенные пулы фраз (`src/core/config.ts` + фолбэк `src/core/interact.ts`), метка задачи без названия (`src/index.ts`), имя персонажа в `lib/assets/manifest.json`.
+- **Текст питомца** (`src/client/logic.ts`): `memoryLine` — русские фразы, кавычки-ёлочки, обрезка подписи 16 символов и итог «всего N».
 - **Метаданные плагина**: `locale/ru.json` и `locale/en.json` (`meta.title` / `meta.description`), экспорт `./locale/*.json` в `package.json`, русский `description` как фолбэк.
 - **Документация**: `README.md` — русский (главный), прежний английский перенесён в `README.en.md`, `README.zh.md` не тронут; бюджет `verify-doc-budget` для `README.md` поднят до 14500 под длину русского текста (запас > 5 %).
 

@@ -1,28 +1,29 @@
-// Роут-уровень: /chat и /voice на мок-хосте (llm-сервис и fetch подменяются).
-// Проверяем HTTP-контракт: CSRF, лимиты тела, включённость функций, ответ модели,
-// сериализацию беседы, деградацию без llm и бинарный ответ TTS.
+// Route tests run chat and voice against a mock host and injected model/network.
+// Cover CSRF, body limits, feature switches, model replies, serialized history,
+// missing model service, and binary TTS responses.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// DSH_HOME читается на импорте модуля — ставим до первого динамического import.
+// Set DSH_HOME before dynamic import because module initialization captures it.
 const home = mkdtempSync(join(tmpdir(), 'whale-chat-'))
 process.env.DSH_HOME = home
 mkdirSync(join(home, 'data', 'whale-girl'), { recursive: true })
 writeFileSync(join(home, 'data', 'whale-girl', 'state.json'), JSON.stringify({}))
 
 /**
- * Запустить Node half с мок-контекстом.
+ * Boot the server plugin against a mock context.
  * @param {{ llm?: object, defaultModel?: object|null, config?: object, fetchImpl?: Function }} opts
  */
-async function boot({ llm = undefined, defaultModel = { currentSelection: () => ({ provider: 'mock-provider', model: 'mock-model' }) }, config = {}, fetchImpl = undefined } = {}) {
+async function boot({ llm = undefined, defaultModel = { currentSelection: () => ({ provider: 'mock-provider', model: 'mock-model' }) }, config = {}, fetchImpl = undefined, sessions = [] } = {}) {
   const routes = []
   const services = {
     webServer: { register: (route) => { routes.push(route) } },
     llm,
     agentDefaultModel: defaultModel,
+    sessions: { list: () => sessions, get: (id) => sessions.find((session) => session.id === id) },
   }
   const handlers = new Map()
   const ctx = {
@@ -37,15 +38,15 @@ async function boot({ llm = undefined, defaultModel = { currentSelection: () => 
     get: (name) => services[name],
     agents: { list: () => [] },
     jobs: { list: () => [], events: { subscribe: () => () => {} } },
-    sessions: { list: () => [] },
+    sessions: services.sessions,
     logger: { warn: () => {}, info: () => {}, error: () => {} },
   }
-  const module = await import(`../lib/index.mjs?chat-test=${Date.now()}${Math.random()}`)
+  const module = await import(`../dist/index.js?chat-test=${Date.now()}${Math.random()}`)
   module.apply(ctx, config)
   const realFetch = globalThis.fetch
   if (fetchImpl !== undefined) globalThis.fetch = fetchImpl
   const call = async (path, method, body, headers = {}) => {
-    const route = routes.find((candidate) => candidate.path === path)
+    const route = routes.find((candidate) => candidate.path === path || (candidate.kind === 'prefix' && path.startsWith(candidate.path)))
     assert.ok(route !== undefined, `route ${path} registered`)
     const chunks = body === undefined ? [] : [Buffer.from(body)]
     const req = {
@@ -76,7 +77,7 @@ async function boot({ llm = undefined, defaultModel = { currentSelection: () => 
 
 const json = (res) => JSON.parse(typeof res.body === 'string' ? res.body : String(res.body))
 
-/** Фейковый llm-сервис: отдаёт текст чанками, опционально завершает ошибкой. */
+/** Fake model service streams text chunks and optionally finishes with an error. */
 function fakeLlm({ text = 'Привет! Я тут.', failure = null, onRequest = () => {} } = {}) {
   return {
     stream(options) {
@@ -232,7 +233,7 @@ test('POST /voice: ошибка TTS-сервера → 502 без бинарно
   const fetchImpl = async () => new Response('nope', { status: 500, headers: { 'content-type': 'text/plain' } })
   const { call, module } = await boot({
     llm: fakeLlm(),
-    config: { voice: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:8880/v1' } },
+    config: { voice: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:8880/v1', model: 'tts-1' } },
     fetchImpl,
   })
   const res = await call(module.VOICE_PATH, 'POST', JSON.stringify({ text: 'x' }), { 'sec-fetch-site': 'same-origin' })
@@ -240,7 +241,7 @@ test('POST /voice: ошибка TTS-сервера → 502 без бинарно
   assert.equal(json(res).error, 'tts-failed')
 })
 
-// ---- выбор модели (GET /models) ----
+// Model selection: GET /models.
 
 test('GET /models: провайдеры/модели llm, сбой одного провайдера пропускается и кэшируется', async () => {
   let calls = 0
@@ -273,7 +274,7 @@ test('GET /models: нет llm-каталога → 200 с пустым options (
   assert.equal(wrongMethod.status, 405)
 })
 
-// ---- распознавание речи (POST /transcribe) ----
+// Speech recognition: POST /transcribe.
 
 const sttConfig = {
   voice: {
@@ -320,7 +321,45 @@ test('POST /transcribe: голос выключен → 403; провайдер 
   assert.equal(json(res).error, 'voice-provider-browser')
 })
 
-// ---- контекст сессии и новости в /chat ----
+// Session context and news in chat requests.
+
+test('POST /chat: selected session includes bounded conversation, excludes other sessions and tool output', async () => {
+  const requests = []
+  const sessions = [
+    { id: 'selected', header: { createdAt: 1 }, deriveMessages: () => [
+      { role: 'system', content: 'secret system prompt' },
+      { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Исправляем авторизацию' }] },
+      { role: 'user', source: { kind: 'agent-instructions', form: 'instructions' }, content: [{ type: 'text', text: 'private AGENTS instructions' }] },
+      { role: 'tool', content: [{ type: 'text', text: 'private tool output' }] },
+      { role: 'assistant', source: { kind: 'model', provider: 'test', model: 'test' }, content: [{ type: 'reasoning', text: 'private reasoning' }, { type: 'text', text: 'Проверяю callback' }] },
+    ] },
+    { id: 'other', header: { createdAt: 1 }, deriveMessages: () => [{ role: 'user', content: 'unrelated conversation' }] },
+  ]
+  const { call, module, emit } = await boot({ sessions, llm: fakeLlm({ onRequest: (request) => requests.push(request) }) })
+  emit('session/event', sessions[0], { type: 'turn/start', data: {} })
+  emit('session/event', sessions[1], { type: 'tool/call', data: { name: 'unrelated-tool' } })
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Как дела?', sessionId: 'selected' }))
+  assert.equal(requests[0].sessionId, 'selected')
+  assert.match(requests[0].system, /Исправляем авторизацию/)
+  assert.match(requests[0].system, /Проверяю callback/)
+  assert.doesNotMatch(requests[0].system, /secret system|private tool|private reasoning|private AGENTS|unrelated/)
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'другая беседа', sessionId: 'other' }))
+  assert.equal(requests[1].messages.length, 1, 'pet conversation history stays inside its session')
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'ещё вопрос', sessionId: 'selected' }))
+  assert.equal(requests[2].messages.length, 3, 'returning to a session restores its own history')
+  assert.doesNotMatch(JSON.stringify(requests[2].messages), /другая беседа/)
+})
+
+test('POST /chat: missing selected session never borrows another session context', async () => {
+  let seen
+  const sessions = [{ id: 'other', deriveMessages: () => [{ role: 'user', content: 'unrelated secret' }] }]
+  const { call, module } = await boot({ sessions, llm: fakeLlm({ onRequest: (request) => { seen = request } }) })
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Как дела?', sessionId: 'missing' }))
+  assert.match(seen.system, /недоступн/)
+  assert.doesNotMatch(seen.system, /unrelated secret/)
+  const bad = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Как дела?', sessionId: 42 }))
+  assert.equal(bad.status, 400)
+})
 
 test('POST /chat: после turn/start в system попадает блок активной сессии', async () => {
   let seen = null
@@ -363,10 +402,85 @@ test('POST /chat: новости недоступны — в system честна
   const { call, module } = await boot({
     llm: fakeLlm({ onRequest: (options) => { seen = options } }),
     fetchImpl: async () => { throw new Error('offline') },
-    // Уникальные ленты: иначе кэш предыдущего теста отдаст заголовки и «недоступности» не будет.
+    // Use unique feeds so cached headlines from another test cannot hide unavailability.
     config: { news: { enabled: true, feeds: ['https://offline.example/feed'], maxItems: 2 } },
   })
   const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'что нового?' }), { 'sec-fetch-site': 'same-origin' })
   assert.equal(res.status, 200)
   assert.match(seen.system, /недоступны/)
+})
+
+
+test('POST /chat: unavailable selected conversation stays observable without failing the pet chat', async () => {
+  let seen
+  const sessions = [
+    { id: 'selected', deriveMessages() { throw new Error('session storage unavailable') } },
+    { id: 'other', deriveMessages: () => [{ role: 'user', content: 'unrelated secret' }] },
+  ]
+  const { call, module } = await boot({ sessions, llm: fakeLlm({ onRequest: request => { seen = request } }) })
+  const res = await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Как дела?', sessionId: 'selected' }))
+  assert.equal(res.status, 200)
+  assert.match(seen.system, /Контекст выбранной сессии .*недоступен/)
+  assert.doesNotMatch(seen.system, /unrelated secret|session storage unavailable/)
+  assert.equal(seen.sessionId, 'selected')
+})
+
+test('POST /voice: subscription is rejected explicitly before network or API credentials', async () => {
+  let networkCalls = 0
+  const { call, module } = await boot({
+    config: { voice: { enabled: true, provider: 'subscription', apiKey: 'must-not-be-used' } },
+    fetchImpl: async () => { networkCalls += 1; throw new Error('network must not be used') },
+  })
+  const res = await call(module.VOICE_PATH, 'POST', JSON.stringify({ text: 'Привет' }))
+  assert.equal(res.status, 409)
+  assert.equal(json(res).error, 'voice-subscription-unsupported')
+  assert.equal(networkCalls, 0)
+  assert.doesNotMatch(String(res.body), /must-not-be-used/)
+})
+
+test('POST /transcribe: subscription is rejected explicitly before network or API credentials', async () => {
+  let networkCalls = 0
+  const { call, module } = await boot({
+    config: { voice: { enabled: true, provider: 'subscription', apiKey: 'must-not-be-used' } },
+    fetchImpl: async () => { networkCalls += 1; throw new Error('network must not be used') },
+  })
+  const res = await call(module.TRANSCRIBE_PATH, 'POST', Buffer.from('audio'), { 'content-type': 'audio/webm' })
+  assert.equal(res.status, 409)
+  assert.equal(json(res).error, 'voice-subscription-unsupported')
+  assert.equal(networkCalls, 0)
+  assert.doesNotMatch(String(res.body), /must-not-be-used/)
+})
+
+test('GET /config: browser config mirror redacts the inline voice credential', async () => {
+  const { call, module } = await boot({ config: { voice: { enabled: true, provider: 'openai', apiKey: 'private-inline-key', model: 'tts-1' } } })
+  const res = await call(module.CONFIG_PATH, 'GET')
+  assert.equal(res.status, 200)
+  assert.equal(json(res).config.voice.apiKey, '')
+  assert.equal(json(res).config.voice.model, 'tts-1')
+  assert.doesNotMatch(String(res.body), /private-inline-key/)
+})
+
+test('POST /chat: disabled session context never reads conversation while keeping pet history separate', async () => {
+  let derived = 0
+  const requests = []
+  const sessions = [{ id: 'selected', deriveMessages() { derived += 1; return [{ role: 'user', content: 'private session message' }] } }]
+  const { call, module } = await boot({ sessions, config: { chat: { sessionContext: false } }, llm: fakeLlm({ onRequest: request => requests.push(request) }) })
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Как дела?', sessionId: 'selected' }))
+  await call(module.CHAT_PATH, 'POST', JSON.stringify({ text: 'Ещё вопрос', sessionId: 'selected' }))
+  assert.equal(derived, 0)
+  assert.equal(requests[1].messages.length, 3)
+  assert.doesNotMatch(JSON.stringify(requests), /private session message|Факты об активной сессии/)
+})
+
+
+
+test('compiled plugin serves manifest and sprite assets from the distributed lib/assets directory', async () => {
+  const { call } = await boot()
+  const manifest = await call('/whale-girl/assets/manifest.json', 'GET')
+  assert.equal(manifest.status, 200)
+  assert.ok(json(manifest).characters['whale-girl'])
+  const sprite = await call('/whale-girl/assets/characters/whale-girl/idle.png', 'GET')
+  assert.equal(sprite.status, 200)
+  assert.equal(sprite.headers['content-type'], 'image/png')
+  assert.equal(sprite.body.subarray(1, 4).toString(), 'PNG')
 })

@@ -31,4 +31,4 @@ Status: implemented
 
 - wake 节奏变为帧0 1000ms → 帧1 200ms（首帧酝酿、后续落定）；其余状态未声明 frameMs，行为不变。
 - 第二角色/新状态可按需声明 frameMs 表达缓动，零代码改动；门禁在投放期拦截长度/数值非法声明。
-- 引用点：`lib/assets/manifest.json`（wake `frameMs`）、`lib/client/index.mjs`（推进条件 `holdFor`）、`scripts/gates/verify-assets.mjs`（校验）+ 自证测试、`docs/sprites-spec.md`（字段契约 + 模板）。
+- 引用点：`lib/assets/manifest.json`（wake `frameMs`）、`src/client/index.ts`（推进条件 `holdFor`）、`scripts/gates/verify-assets.mjs`（校验）+ 自证测试、`docs/sprites-spec.md`（字段契约 + 模板）。

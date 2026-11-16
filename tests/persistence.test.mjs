@@ -1,7 +1,7 @@
-// 持久化纯逻辑单测（node:test）。归属：src/persistence.mjs 的行为改动跑本文件。
+// Pure persistence normalization and serialization regressions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeState, serializeState } from '../lib/src/persistence.mjs'
+import { normalizeState, serializeState } from '../dist/core/persistence.js'
 
 test('normalizeState: 合法账本原样归一化', () => {
   const s = normalizeState({
@@ -46,7 +46,7 @@ test('normalizeState: 巨量 xp 截断到上限 + 浮点取整（integer schema 
 test('normalizeState: 重复称号去重 + stats 与 INITIAL_STATE 合并', () => {
   const s = normalizeState({ xp: 10, titles: ['first-task', 'first-task'], updatedAt: 0 })
   assert.deepEqual(s.titles, ['first-task'])
-  assert.equal(s.stats.activeMs, 0) // 缺字段补齐而非 undefined
+  assert.equal(s.stats.activeMs, 0) // Fill missing fields rather than leaving undefined values.
   assert.equal(s.stats.firstSeenAt, null)
 })
 

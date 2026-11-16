@@ -1,9 +1,8 @@
-// parseTurnEvent 单测：官方 SessionEvent 结构 → turn 边沿判定。
-// 回归防线：字段是 type 不是 kind（bug-fix 2026-08-10-session-event-field）——
-// 若实现回退到 kind，本测试拒绝。
+// Turn-edge regressions use the official event.type field.
+// Reading event.kind instead must fail these tests.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseTurnEvent } from '../lib/src/session-events.mjs'
+import { parseTurnEvent } from '../dist/core/session-events.js'
 
 const turn = (type, data) => ({ type, seq: 1, time: 1, data })
 
@@ -35,7 +34,7 @@ test('结构异常返回 null（不抛）', () => {
   assert.equal(parseTurnEvent(null), null)
   assert.equal(parseTurnEvent('nope'), null)
   assert.equal(parseTurnEvent({}), null)
-  // turn/end 但 data/reason 结构异常：按 end 边沿兜底（celebrate 不丢），blocked 无法判定为 false
+  // Malformed turn/end data still closes the turn; unrecognizable blocking defaults to false.
   assert.deepEqual(parseTurnEvent({ type: 'turn/end' }), { kind: 'end', blocked: false })
   assert.deepEqual(parseTurnEvent({ type: 'turn/end', data: null }), { kind: 'end', blocked: false })
   assert.deepEqual(parseTurnEvent({ type: 'turn/end', data: { reason: null } }), { kind: 'end', blocked: false })

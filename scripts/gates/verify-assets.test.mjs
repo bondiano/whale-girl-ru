@@ -1,15 +1,14 @@
-// 门禁自证：verify-assets 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
-// v5：素材全量契约——每个角色必须含全部 15 状态（STATE_NAMES），缺一即拒。
+// Asset gate regressions prove invalid input is rejected.
+// Run when changing the gate; every character must provide the full STATE_NAMES set.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { check } from './verify-assets.mjs'
-import { STATE_NAMES } from '../../lib/client/logic.mjs'
+import { STATE_NAMES } from '../../dist/client/logic.js'
 
-/** 构造一个含全部 15 状态的完整 manifest（每个状态一个合法条目）。 */
+/** Create a complete manifest with one valid entry for each of the 15 states. */
 function fullStates(overrides = {}) {
   const states = {}
   for (const name of STATE_NAMES) {
@@ -19,7 +18,7 @@ function fullStates(overrides = {}) {
   return { states }
 }
 
-/** 写全 15 个 sheet 文件（目录由 root 决定）。 */
+/** Write all 15 sheet files beneath the supplied root. */
 function writeSheets(root, dir = 'lib/assets') {
   for (const name of STATE_NAMES) {
     const p = join(root, dir, `${name}.png`)
@@ -38,7 +37,7 @@ function makeTree(files) {
   return root
 }
 
-/** 构造最小 PNG 头（宽高可指定；门禁只读 IHDR 尺寸）。 */
+/** Create a minimal PNG header with chosen IHDR dimensions. */
 function fakePng(w, h) {
   const buf = Buffer.alloc(24)
   buf.writeUInt32BE(0x89504e47, 0)
@@ -58,7 +57,7 @@ test('接受：全 15 状态 + sheet 全存在且字段合法', () => {
 
 test('拒绝：缺必备状态（素材必须全量，不再 emoji 降级）', () => {
   const states = fullStates()
-  delete states.states.think // 缺一个
+  delete states.states.think // Remove one required state.
   const root = makeTree({ 'lib/assets/manifest.json': states })
   writeSheets(root, 'lib/assets')
   const { ok, errors } = check(root)
@@ -67,7 +66,7 @@ test('拒绝：缺必备状态（素材必须全量，不再 emoji 降级）', (
 })
 
 test('拒绝：manifest 引用不存在的 sheet（含状态名与路径）', () => {
-  const root = makeTree({ 'lib/assets/manifest.json': fullStates() }) // 不写 sheet 文件
+  const root = makeTree({ 'lib/assets/manifest.json': fullStates() }) // Do not create the referenced sheet file.
   const { ok, errors } = check(root)
   assert.equal(ok, false)
   assert.match(errors.join('\n'), /states\.idle/)
@@ -172,7 +171,7 @@ test('拒绝：单姿势 256×256 配 frames:2（宽度 ≠ 2×高度，姿势�
   const bad = fullStates({ eat: { sheet: 'eat.png', frames: 2, fps: 10, playback: 'once' } })
   const root = makeTree({ 'lib/assets/manifest.json': bad })
   writeSheets(root, 'lib/assets')
-  // 覆盖 eat 为 256 单宽（其他状态正常 512）——在 writeSheets 之后覆盖
+  // After writing valid sheets, replace eat with a single-width 256px image.
   writeFileSync(join(root, 'lib', 'assets', 'eat.png'), fakePng(256, 256))
   const { ok, errors } = check(root)
   assert.equal(ok, false)
@@ -209,7 +208,7 @@ test('拒绝：角色 sheet 文件缺失（期望在 characters/<id>/ 下）', (
     characters: { 'whale-girl': { states: fullStates().states } },
     default: 'whale-girl',
   }
-  const root = makeTree({ 'lib/assets/manifest.json': bad, 'assets/idle.png': 'x' }) // 平铺不算数
+  const root = makeTree({ 'lib/assets/manifest.json': bad, 'assets/idle.png': 'x' }) // A flat file does not satisfy the character-directory contract.
   const { ok, errors } = check(root)
   assert.equal(ok, false)
   assert.match(errors.join('\n'), /文件不存在.*characters\/whale-girl\/idle\.png/)
@@ -246,7 +245,7 @@ test('接受：旧格式顶层 states（sheet 平铺 assets/）兼容', () => {
   assert.equal(ok, true, errors.join('\n'))
 })
 
-// ---- playback 播放模式（v5）----
+// Playback mode validation.
 
 test('接受：四种 playback 模式 + 帧数下限满足', () => {
   const good = fullStates({
@@ -256,7 +255,7 @@ test('接受：四种 playback 模式 + 帧数下限满足', () => {
   })
   const root = makeTree({ 'lib/assets/manifest.json': good })
   writeSheets(root, 'lib/assets')
-  // blink/pingpong 用 3 帧 → 需 768×256；覆盖（其他状态默认 512×256 匹配 frames:2）
+  // Three-frame blink/pingpong needs a 768x256 sheet; other sheets retain two frames.
   writeFileSync(join(root, 'lib', 'assets', 'idle.png'), fakePng(768, 256))
   writeFileSync(join(root, 'lib', 'assets', 'walk.png'), fakePng(768, 256))
   const { ok, errors } = check(root)
@@ -274,8 +273,8 @@ test('拒绝：playback 不在封闭枚举', () => {
 
 test('拒绝：blink/pingpong 帧数低于下限（交叉校验）', () => {
   const bad = fullStates({
-    idle: { sheet: 'idle.png', frames: 1, fps: 2, playback: 'blink' },    // blink 需 ≥2
-    walk: { sheet: 'walk.png', frames: 1, fps: 6, playback: 'pingpong' }, // pingpong 需 ≥2
+    idle: { sheet: 'idle.png', frames: 1, fps: 2, playback: 'blink' },    // blink requires at least two frames.
+    walk: { sheet: 'walk.png', frames: 1, fps: 6, playback: 'pingpong' }, // pingpong requires at least two frames.
   })
   const root = makeTree({ 'lib/assets/manifest.json': bad })
   writeSheets(root, 'lib/assets')
@@ -287,7 +286,7 @@ test('拒绝：blink/pingpong 帧数低于下限（交叉校验）', () => {
 
 test('拒绝：playback 字段缺失（undefined）——枚举校验兜住', () => {
   const bad = fullStates()
-  delete bad.states.idle.playback // 漏配 playback
+  delete bad.states.idle.playback // Omit the required playback mode.
   const root = makeTree({ 'lib/assets/manifest.json': bad })
   writeSheets(root, 'lib/assets')
   const { ok, errors } = check(root)
@@ -296,7 +295,7 @@ test('拒绝：playback 字段缺失（undefined）——枚举校验兜住', ()
 })
 
 test('拒绝：characters 与顶层 states 并存时顶层遗留块同样校验（防死数据盲区）', () => {
-  // characters 全量正常 + 顶层 states 缺必备状态（think）→ 并存时也必须红
+  // Valid character states must not conceal a legacy top-level block missing think.
   const bad = {
     characters: { 'whale-girl': { states: fullStates().states } },
     default: 'whale-girl',

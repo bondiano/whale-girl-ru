@@ -1,16 +1,9 @@
-// 浏览器级行为验证（人工验证步骤，非门禁——依赖 Chrome 与运行中的 web，同 verify-client-smoke）。
-// 用法：node scripts/verify-client-behavior.mjs <web-url> [scenario]
-// 场景：sleep-drag-wake（默认）——验证「sleep → 拖拽 → 放下 → idle 缓冲 → wake → 保持清醒
-// 不回 sleep」完整链路（v6 交互醒觉回归防线，见决策记录 2026-08-10-client-behavior-probe.md）。
-// 场景：update-row——验证配置卡片的更新行「点检查 → 点更新 → 真的发出 POST /whale-girl/update」链路
-// （需要部署里确实有新版可更新；按钮接线错位这类问题只有真点一下才暴露）。
-// 场景：memory-bubble——验证会话记忆回读气泡「/state 的 memory → 气泡文案 → 按 at 去重」链路
-// （拦 /state 响应注入 memory，不依赖真实任务/会话边沿，因此可重复跑）。
-// 场景：chat-inline——验证内联输入条 + 漫画气泡「打开聊天 → 宠物冻结 → 提交 → 多行气泡在视口内
-// → Esc 关闭 → 宠物恢复走动」链路（chat 请求用 window.fetch 桩替换，不依赖真实模型/环境）。
-// 此前同类验证是一次性 /tmp/cdp-*.mjs 探针（不入库、不可重跑）——本文件固化场景，
-// 断言失败非零退出，供 client 行为改动后重跑。
-// 依赖：本机 Chrome（CHROME_BIN 可覆盖）；Node ≥22（全局 WebSocket）。
+// Browser behavior probes require Chrome and a running web host.
+// Usage: node scripts/verify-client-behavior.mjs <web-url> [scenario].
+// Scenarios cover sleep/drag/wake, the real update-button request, memory-bubble
+// deduplication, and inline chat layout/freezing/Escape recovery.
+// Memory and chat probes inject deterministic responses, independent of real tasks or models.
+// Failed assertions exit nonzero. CHROME_BIN overrides Chrome; Node >=22 supplies WebSocket.
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -20,8 +13,8 @@ const CHROME = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Conten
 const URL = process.argv[2]
 const SCENARIO = process.argv[3] ?? 'sleep-drag-wake'
 const DEBUG_PORT = 9240
-// 新版 Chrome 拒绝带 Origin 的 CDP WebSocket（需 --remote-allow-origins）；不隔离
-// --user-data-dir 时会挂到默认 profile（复用已有浏览器实例，/json 里可能是别的标签页）。
+// Chrome requires --remote-allow-origins for CDP connections with Origin.
+// Use a separate user-data directory to avoid attaching to an existing browser profile.
 const PROFILE_DIR = mkdtempSync(join(tmpdir(), 'whale-girl-behavior-'))
 
 if (!URL) {
@@ -29,7 +22,7 @@ if (!URL) {
   process.exit(2)
 }
 
-// ---- CDP 基础（headless Chrome + Runtime/Input）----
+// CDP setup: headless Chrome with Runtime and Input domains.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function connect() {
   const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-sandbox', '--remote-allow-origins=*', `--user-data-dir=${PROFILE_DIR}`, `--remote-debugging-port=${DEBUG_PORT}`, '--window-size=1280,800', URL], { stdio: 'ignore' })
@@ -54,7 +47,7 @@ async function connect() {
     ws.addEventListener('message', onMsg)
     ws.send(JSON.stringify({ id: myId, method, params }))
   })
-  // CDP 事件（无 id 的通知）分发：Fetch.requestPaused 这类要边跑边应答的场景需要它。
+  // Dispatch unsolicited CDP notifications, including paused Fetch requests requiring replies.
   const listeners = new Map()
   const on = (method, handler) => {
     const set = listeners.get(method) ?? new Set()
@@ -69,7 +62,7 @@ async function connect() {
   await call('Runtime.enable')
   return { chrome, call, on }
 }
-/** 读取当前 sprite 的 sheet 名（background-image URL 末段）与 motion 类——状态观察面。 */
+/** Observe state through the current sprite sheet filename and motion class. */
 const SNAP = `(() => {
   const sprite = document.querySelector('[data-whale-girl] .pet-sprite')
   const stage = document.querySelector('[data-whale-girl] .pet-stage')
@@ -79,9 +72,9 @@ const SNAP = `(() => {
   return JSON.stringify({ ok: true, sheet: m ? m[0].replace('.png', '') : 'unknown', motion: motion.replace('pet-motion-', '') })
 })()`
 
-// ---- 场景：sleep → drag → 放下 → 清醒不回 sleep ----
-// 走真实时间（sleepAfterMs=60000 + 3s 轮询）；断言序列是 v6 交互醒觉的契约：
-// 放下后直接 wake（3s，睡着被拖起时放下缓冲让位 wake）→ 底层状态，10s 内不得回到 sleep。
+// Sleep/drag/release probe uses real time: sleepAfterMs=60000 plus polling.
+// Dragging a sleeping pet must lead directly to a three-second wake transition,
+// then its underlying state, without returning to sleep for ten seconds.
 async function sleepDragWake({ call, log }) {
   await call('Runtime.evaluate', { expression: `(() => {
     const t = document.getElementById('deepseek-onboarding-title')
@@ -90,14 +83,14 @@ async function sleepDragWake({ call, log }) {
     if (labelled) labelled.remove()
     return 'ok'
   })()`, returnByValue: true })
-  await sleep(1500) // 等 onboarding 隐藏的宠物恢复显示（syncInert 经 MutationObserver）
+  await sleep(1500) // Wait for MutationObserver-driven syncInert to restore the pet after onboarding.
   const read = async (label) => {
     const r = await call('Runtime.evaluate', { expression: SNAP, returnByValue: true })
     const v = JSON.parse(r.result.value)
     log(label, `${v.ok ? v.sheet + '/' + v.motion : 'no-sprite'}`)
     return v
   }
-  // 轮询等待某状态出现（消除固定 sleep 的时序脆弱性——headless 下事件/资源处理有抖动）。
+  // Poll for the expected state instead of assuming stable headless timing.
   const waitFor = async (label, predicate, timeoutMs = 4000) => {
     const start = Date.now()
     let last = null
@@ -127,7 +120,7 @@ async function sleepDragWake({ call, log }) {
   }
   await waitFor('during-drag', (v) => v.sheet === 'drag')
   await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x - 250, y, button: 'left', clickCount: 1 })
-  // 放下后：睡着被拖起直接 wake（3s，放下缓冲让位 wake）→ 底层状态，全程不得回 sleep。
+  // Release must produce wake, then the underlying state, without returning to sleep.
   await waitFor('release-wake', (v) => v.sheet === 'wake', 4000)
   const t3 = await waitFor('release-settled', (v) => v.sheet !== 'wake' && v.sheet !== 'sleep', 5000)
   if (t3.sheet === 'sleep') throw new Error('放下后回到 sleep（空闲计时未重置）')
@@ -137,17 +130,16 @@ async function sleepDragWake({ call, log }) {
   return { during: 'drag', releaseWake: 'wake', settled: t3.sheet, release10s: t4.sheet }
 }
 
-// ---- 场景：更新行「检查 → 更新」点击链路 ----
-// 先点一次按钮把检查跑起来（挂载时本来也会查一次），等状态行给出「有新版本 / 已是最新」；若按钮
-// 变成更新动作（primary），再点一次，断言真的发出 POST /whale-girl/update、且按钮没有抛异常。
+// Exercise the update row: check first, wait for a settled status, then update
+// when available and assert the actual update POST was sent without button errors.
 async function updateRow({ call, log }) {
   const evaluate = async (expression) => {
-    // awaitPromise：场景里的导航/点击是 async IIFE，不 await 拿回来的是 Promise 对象。
+    // Await asynchronous navigation/click expressions rather than receiving an unresolved Promise.
     const r = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
     if (r.exceptionDetails) throw new Error(`页面脚本抛错：${r.exceptionDetails.text ?? 'unknown'}`)
     return r.result.value
   }
-  // 首启弹窗（Preview Notice / 稍后配置）会挡住外壳：先点掉再等侧栏出现（英文界面同样要认）。
+  // Dismiss first-run dialogs before waiting for the sidebar; recognize English labels too.
   const shell = await evaluate(`(async () => {
     const texts = (label) => [...document.querySelectorAll('a,button,div,span,p')].filter((n) => (n.innerText || '').trim() === label)
     for (let i = 0; i < 90; i += 1) {
@@ -162,7 +154,7 @@ async function updateRow({ call, log }) {
     return 'timeout'
   })()`)
   if (shell !== 'ready') throw new Error('等待应用外壳超时（侧栏没出现）')
-  // 清掉首启弹窗并进入插件列表 → whale-girl 包页。
+  // Dismiss onboarding, open the plugin list, then the whale-girl package page.
   const gotoPluginPage = `(async () => {
     const click = async (labels, ms) => {
       for (const label of labels) {
@@ -181,7 +173,7 @@ async function updateRow({ call, log }) {
   })()`
   const landed = await evaluate(gotoPluginPage)
   if (landed !== 'ok') throw new Error(`没能停在更新行上（${landed}）`)
-  // 记录端点请求：接线错位时这里一条都不会有。
+  // Record endpoint requests so incorrectly wired buttons cannot pass.
   await evaluate(`(() => {
     window.__wgCalls = []
     const real = window.fetch
@@ -243,11 +235,9 @@ async function updateRow({ call, log }) {
   return { posted: posted.length, label: after.label, status: after.status.replace(/\n/gu, ' ') }
 }
 
-// ---- 场景：会话记忆回读气泡（/state 的 memory 字段 → 气泡文案 → 按 at 去重）----
-// memory 是 Node half 与 client 之间唯一的记忆通路：字段名、形状或去重键任一处漂移，气泡就静默消失
-// （不报错、宠物照常跑），所以必须真在浏览器里看一眼。用 CDP Fetch 拦 /state 响应注入 memory
-// （其余字段原样透传，不动宠物状态机），断言「出现 → 同一 at 不重播 → at 变化再播」。
-// 不依赖真实任务/会话边沿（那要求 60s 窗口内正好有一次 resume/fork），因此可重复跑。
+// Memory-bubble probe: inject only /state.memory through CDP Fetch.
+// Assert initial playback, no replay for an unchanged at key, and replay after at changes.
+// This verifies the server/client wire contract without requiring a real resume/fork event.
 async function memoryBubble({ call, log, on }) {
   await call('Runtime.evaluate', { expression: `(() => {
     const t = document.getElementById('deepseek-onboarding-title')
@@ -256,9 +246,9 @@ async function memoryBubble({ call, log, on }) {
     if (labelled) labelled.remove()
     return 'ok'
   })()`, returnByValue: true })
-  await sleep(1500) // 等 onboarding 隐藏的宠物恢复显示（syncInert 经 MutationObserver）
+  await sleep(1500) // Wait for MutationObserver-driven syncInert to restore the pet after onboarding.
 
-  let injected = null // null = 透传真实响应；否则把它作为 memory 字段下发
+  let injected = null // null passes through the real response; otherwise inject this memory field.
   let hits = 0
   on('Fetch.requestPaused', async (params) => {
     try {
@@ -277,7 +267,7 @@ async function memoryBubble({ call, log, on }) {
         responseHeaders: [{ name: 'content-type', value: 'application/json' }],
         body: Buffer.from(JSON.stringify(payload), 'utf8').toString('base64'),
       })
-    } catch { /* 页面卸载/请求取消时 fulfill 会失败：与断言无关，忽略 */ }
+    } catch { /* Navigation or request cancellation may prevent fulfillment; this does not affect the assertions. */ }
   })
   await call('Fetch.enable', { patterns: [{ urlPattern: '*whale-girl/state*', requestStage: 'Response' }] })
 
@@ -288,7 +278,7 @@ async function memoryBubble({ call, log, on }) {
     })()`, returnByValue: true })
     return JSON.parse(r.result.value)
   }
-  /** 等气泡变成期望值（want=null 表示等它消失）；轮询间隔 pollMs 默认 3s，超时给足三轮。 */
+  /** Wait for the expected bubble, or disappearance when want=null; allow three polling rounds. */
   const waitBubble = async (want, what) => {
     const deadline = Date.now() + 12000
     for (;;) {
@@ -299,19 +289,19 @@ async function memoryBubble({ call, log, on }) {
     }
   }
 
-  // ① 首次下发：气泡出现，文案由 memoryLine 生成（distance 0 → 「上次你们完成了…」）。
+  // First injection must show memoryLine's direct-session recall text.
   injected = { at: 1, distance: 0, title: null, tasks: [{ label: '修复门禁', ok: true, at: 1 }] }
   await waitBubble('上次你们完成了「修复门禁」', '首次回读')
   log('memory-bubble', `气泡出现「上次你们完成了「修复门禁」」（已拦截 /state ${hits} 次）`)
 
-  // ② 同一个 at 继续下发：气泡寿命（bubbleMs 默认 2.5s）过后不得重播——去重键是 at，不是「每轮都播」。
+  // An unchanged at must not replay after the bubble lifetime; deduplication is event-based.
   await waitBubble(null, '气泡消失')
-  await sleep(8000) // ≥2 轮轮询
+  await sleep(8000) // Allow at least two polling rounds.
   const replayed = await readBubble()
   if (replayed !== null) throw new Error(`同一 at 重播了气泡：${JSON.stringify(replayed)}`)
   log('memory-bubble', '同一 at 未重播（去重生效）')
 
-  // ③ at 变化（等价于新的 resume/fork 边沿）→ 再播一次；distance>0 走分支文案，失败任务不进文案。
+  // A changed at represents a new resume/fork edge; ancestor recall excludes failed tasks.
   injected = {
     at: 2,
     distance: 1,
@@ -323,13 +313,9 @@ async function memoryBubble({ call, log, on }) {
   return { hits }
 }
 
-// ---- 场景：内联输入条 + 漫画气泡 + 聊天期间冻结 ----
-// 断言（全部在真实浏览器里）：
-// ① 打开聊天后输入条 [data-whale-girl-chat] 存在、矮（<120px）、在视口内；
-// ② 聊天打开时调 __whaleGirlTest.walkNow() 宠物不动、walking=false（冻结走路）；
-// ③ 提交后多行回复出现在 .pet-bubble：换行保留、white-space≠nowrap、气泡在视口内且在输入条上方；
-// ④ Esc 关闭后 walkNow() 能真的走起来（反向断言，防止「永远不走」也通过冻结测试）。
-// 测试缝 window.__whaleGirlTest 只在 ?whale-girl-test=1 时由 client 暴露（见 index.mjs）。
+// Inline-chat probe checks viewport-safe compact input and multiline replies,
+// no wandering while chat is open, and restored wandering after Escape.
+// The test seam is exposed only when explicitly enabled for the browser session.
 async function chatInline({ call, log }) {
   const evaluate = async (expression) => {
     const r = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
@@ -338,14 +324,14 @@ async function chatInline({ call, log }) {
   }
   const readJson = async (expression) => JSON.parse(await evaluate(expression))
 
-  // Токен доступа web-сервера одноразовый: первый заход его съедает и чистит URL, поэтому
-  // тестовый флаг кладём в sessionStorage и перезагружаемся (переживает reload того же таба).
+  // The web access token is consumed on first navigation; persist the test flag
+  // in sessionStorage before reloading the same tab.
   await call('Page.navigate', { url: URL })
   await sleep(1500)
   await evaluate(`(() => { sessionStorage.setItem('whale-girl-test', '1'); return 'ok' })()`)
   await call('Page.reload', { ignoreCache: true })
   await sleep(1500)
-  // 首启弹窗会把宠物藏起来（syncInert）：去掉它再等挂载恢复。
+  // Dismiss onboarding so syncInert can restore the pet.
   const clearOnboarding = `(() => {
     const t = document.getElementById('deepseek-onboarding-title')
     if (t) t.remove()
@@ -370,7 +356,7 @@ async function chatInline({ call, log }) {
   await sleep(800)
   await evaluate(clearOnboarding)
 
-  // 打开聊天：Enter 打开菜单 → 点「💬 Поговорить」。
+  // Open the menu with Enter, then activate the chat action.
   const opened = await evaluate(`(() => {
     const stage = document.querySelector('[data-whale-girl] .pet-stage')
     stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -393,7 +379,7 @@ async function chatInline({ call, log }) {
   })()`)
   if (!composer.ok) throw new Error('聊天打开后没有 [data-whale-girl-chat]')
   if (composer.height >= 120) throw new Error(`输入条太高（${Math.round(composer.height)}px）：疑似还留着旧面板`)
-  // 断言边界取真实视口：headless 的 innerHeight 不等于 --window-size 的高度。
+  // Use actual viewport bounds; headless innerHeight can differ from --window-size.
   const viewport = await readJson('JSON.stringify({ w: window.innerWidth, h: window.innerHeight })')
   const vw = viewport.w
   const vh = viewport.h
@@ -402,7 +388,7 @@ async function chatInline({ call, log }) {
   }
   log('chat-open', `输入条 ${Math.round(composer.height)}px @ ${Math.round(composer.left)},${Math.round(composer.top)}`)
 
-  // 冻结：聊天打开时强制一次真实 wander —— 宠物不得移动，walking 必须回到 false。
+  // Force a real wander attempt while chat is open; position must stay fixed and walking=false.
   const p0 = await readJson('JSON.stringify(window.__whaleGirlTest.position())')
   await evaluate('window.__whaleGirlTest.walkNow()')
   await sleep(800)
@@ -414,7 +400,7 @@ async function chatInline({ call, log }) {
   if (walking !== false) throw new Error('聊天打开时 walking 仍是 true（没有 stopWalk）')
   log('chat-frozen', `聊天期间 walkNow() 后位置不变 ${JSON.stringify(p1)}，walking=false`)
 
-  // 提交：桩掉 /whale-girl/chat，让多行回复立刻到达（不依赖模型/网络）。
+  // Stub the chat endpoint with a multiline response, independent of the model or network.
   const submitted = await evaluate(`(() => {
     window.__wgChatCalls = []
     const real = window.fetch
@@ -472,7 +458,7 @@ async function chatInline({ call, log }) {
   }
   log('chat-bubble', `多行气泡 ${Math.round(bubble.right - bubble.left)}×${Math.round(bubble.bottom - bubble.top)} white-space=${bubble.whiteSpace}`)
 
-  // Esc 关闭 → 反向断言：宠物必须能重新走起来（防止「永远不走」也通过冻结断言）。
+  // After Escape, assert wandering resumes so a permanently stationary pet cannot pass.
   await evaluate(`(() => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     return 'ok'

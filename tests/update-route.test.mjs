@@ -1,22 +1,21 @@
-// 更新端点（/whale-girl/update）的路由级测试：用一个最小 mock ctx 起 Node half，直接调路由处理器。
-// 归属：lib/index.mjs 里更新端点与 applyUpdate 的行为改动跑本文件。
-// 这一层只管 HTTP 层与端到端接线：跨源请求被拒、方法/缓存头、载荷形状、来源取 profile 记录、两步重装与
-// 启停状态；状态机、.git 布局解析与各失败分支的精确行为在 tests/update-host.test.mjs（那边用真实临时目录
-// 与注入的假依赖，能覆盖到 worktree、限流、第二步失败等路由层不好造的场景）。
+// Update-route tests run the server plugin against a minimal mock host.
+// Cover cross-origin rejection, methods/cache headers, payloads, profile-recorded
+// source, two-step reinstall, and enabled state. Detailed state/Git/failure cases
+// are covered by the independent host-update suite.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// DSH_HOME 在模块加载时就被读走（状态文件位置），所以先设再动态 import。
+// Set DSH_HOME before dynamic import captures the state-file location.
 const home = mkdtempSync(join(tmpdir(), 'whale-route-'))
 process.env.DSH_HOME = home
 
 const SOURCE = 'github:vlln/whale-girl#main'
 const SHA = 'ab12cd34ef56ab78cd90ef12ab34cd56ef78ab90'
 
-/** 建一个临时 profile：package.json 记来源，pnpm-lock.yaml 记已安装提交。 */
+/** Create a profile with source in package.json and installed commit in its lockfile. */
 function makeProfile(source) {
   const dir = mkdtempSync(join(home, 'profile-'))
   mkdirSync(dir, { recursive: true })
@@ -29,7 +28,7 @@ function makeProfile(source) {
   return dir
 }
 
-/** 起一个 Node half 实例，返回取到的路由与安装调用记录。 */
+/** Boot the server plugin and return captured routes and installation calls. */
 async function boot({
   source = SOURCE,
   enabled = true,
@@ -63,7 +62,7 @@ async function boot({
     sessions: { list: () => [] },
     logger: { warn: () => {}, info: () => {}, error: () => {} },
   }
-  const module = await import(`../lib/index.mjs?route-test=${Date.now()}${Math.random()}`)
+  const module = await import(`../dist/index.js?route-test=${Date.now()}${Math.random()}`)
   module.apply(ctx, {})
   const route = routes.find((candidate) => candidate.path === module.UPDATE_PATH)
   assert.ok(route !== undefined, '更新端点应该注册到 webServer')
@@ -79,7 +78,7 @@ async function boot({
   return { call, installs }
 }
 
-/** 建一个本地检出目录（`.git` 目录 + 松散引用）。 */
+/** Create a local checkout with a .git directory and loose refs. */
 function makeCheckout({ sha, worktree = false }) {
   const dir = mkdtempSync(join(home, 'checkout-'))
   if (!worktree) {
@@ -88,7 +87,7 @@ function makeCheckout({ sha, worktree = false }) {
     writeFileSync(join(dir, '.git', 'refs', 'heads', 'main'), `${sha}\n`)
     return dir
   }
-  // worktree：<dir>/.git 是文件，指向 <common>/.git/worktrees/<name>；分支引用写在公共目录里。
+  // A worktree's .git file points into the common worktrees directory; branch refs stay common.
   const common = mkdtempSync(join(home, 'common-'))
   mkdirSync(join(common, '.git', 'worktrees', 'wt1'), { recursive: true })
   mkdirSync(join(common, '.git', 'refs', 'heads'), { recursive: true })
@@ -99,7 +98,7 @@ function makeCheckout({ sha, worktree = false }) {
   return dir
 }
 
-/** 本地路径安装的 profile：来源是 link: 指向的检出目录。 */
+/** Create a local-path installation whose link: source points at the checkout. */
 function makeLocalProfile(checkout) {
   const dir = mkdtempSync(join(home, 'profile-'))
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'whale-girl': `link:${checkout}` } }))

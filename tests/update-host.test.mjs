@@ -1,12 +1,12 @@
-// 更新宿主侧实现的单测（node:test，零依赖）。归属：lib/src/update-host.mjs 的行为改动跑本文件。
-// 这里用真实临时目录 + 注入的假包管理器/假网络，覆盖 .git 布局解析、当前身份读取、上游三态与两步安装；
-// 端点层（跨源、405、载荷）由 tests/update-route.test.mjs 覆盖。
+// Host-update tests use real temporary directories and injected package/network services.
+// Cover Git layouts, installed identity, upstream states, and two-step installation.
+// Route-level admission, methods, and payloads are tested separately.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createUpdateHost, readGitHead } from '../lib/src/update-host.mjs'
+import { createUpdateHost, readGitHead } from '../dist/core/update-host.js'
 
 const SELF = { name: 'whale-girl', version: '0.1.0', repository: { owner: 'vlln', repo: 'whale-girl' } }
 const LOCAL_SHA = 'a1'.repeat(20)
@@ -14,7 +14,7 @@ const UPSTREAM_SHA = 'b2'.repeat(20)
 
 const home = mkdtempSync(join(tmpdir(), 'whale-host-'))
 
-/** 建一个 profile 目录：锁文件记已安装的提交（git）或版本（registry）。 */
+/** Create a profile with an installed Git commit or registry version in its lockfile. */
 function makeProfile(lockYaml) {
   const dir = mkdtempSync(join(home, 'profile-'))
   writeFileSync(join(dir, 'pnpm-lock.yaml'), lockYaml)
@@ -24,7 +24,7 @@ function makeProfile(lockYaml) {
 const gitLock = (sha) => ['packages:', `  whale-girl@https://codeload.github.com/vlln/whale-girl/tar.gz/${sha}:`, '    resolution: {gitHosted: true}'].join('\n')
 const registryLock = (version) => ['packages:', `  whale-girl@${version}:`, '    resolution: {integrity: sha512-x}'].join('\n')
 
-/** 建一个检出目录：`worktree: true` 时用 `.git` 文件 + commondir（worktree 布局）。 */
+/** Create a checkout; worktree:true uses a .git file and commondir layout. */
 function makeCheckout({ sha = LOCAL_SHA, worktree = false, packed = false, detached = false } = {}) {
   const dir = mkdtempSync(join(home, 'checkout-'))
   const ref = packed ? '' : null
@@ -49,16 +49,20 @@ function makeCheckout({ sha = LOCAL_SHA, worktree = false, packed = false, detac
   return dir
 }
 
-/** 两代 `BundleInfo` 的忠实字段集（夹具用）：年代判据靠字段有无，别只挑单个字段造形状。
- *  legacy = 0.2.0-rc.2 及更早：有 `version`，没有 `source`/`official`/`availability`（latest 通道实测）。
- *  modern = 0.2.1-alpha.2 起：`official`/`availability` 恒有；`source` 只有 profile 自有依赖才有。 */
+/**
+ * Faithful BundleInfo generation fixtures: legacy hosts through 0.2.0-rc.2 expose
+ * version but no source/official/availability. Modern hosts always expose official
+ * and availability; source exists only for dependencies owned by the profile.
+ */
 const BUNDLE_SHAPES = {
   legacy: { version: '0.2.0' },
   modern: { official: false, availability: 'profile', version: '0.2.0' },
 }
 
-/** 假宿主包管理服务：`shape` 选年代形状，其余字段可覆盖；传 `null` = 显式删掉该字段
- *  （造「新宿主但包清单读不到 → 连 version 都没有」这类真实组合）。 */
+/**
+ * Fake package manager selects a host-generation shape; overrides customize fields.
+ * An explicit null removes a field, modeling missing package metadata on a modern host.
+ */
 const managerOf = (source, { enabled = true, installs = [], shape, ...fields } = {}) => () => {
   const bundle = {
     name: 'whale-girl',
@@ -74,7 +78,7 @@ const managerOf = (source, { enabled = true, installs = [], shape, ...fields } =
     installBundle: async (spec, options) => { installs.push({ spec, options }); return { application: 'restart-required', changed: true } },
   }
 }
-/** 假网络：只认 GitHub/npm 的那几个 URL，按 payload 表回答；值是 Error 时抛出（模拟 403 等）。 */
+/** Fake networking recognizes expected GitHub/npm URLs; Error payloads simulate failures. */
 const fakeFetch = (routes) => async (url) => {
   for (const [suffix, payload] of Object.entries(routes)) {
     if (url.endsWith(suffix)) {
@@ -153,7 +157,7 @@ test('status：git 安装有新版时可更新；宿主没有包管理服务时 
   const withManager = await createUpdateHost({ self: SELF, profileDir, managerOf: managerOf('github:vlln/whale-girl#main'), fetchJson }).status()
   assert.equal(withManager.state, 'update-available')
   assert.equal(withManager.canUpdate, true)
-  // 服务在、但没有安装能力（或插件比服务先起）：结论照给，只说「不支持应用内更新」。
+  // A present service without installation capability still returns status with updating unsupported.
   const noInstall = () => ({ listBundles: async () => [{ name: 'whale-girl', source: 'github:vlln/whale-girl#main', enabled: true }] })
   const withoutInstall = await createUpdateHost({ self: SELF, profileDir, managerOf: noInstall, fetchJson }).status()
   assert.equal(withoutInstall.state, 'update-available')
@@ -207,25 +211,24 @@ test('status：本地路径安装认不出上游的三种情况都给 local-sour
 
 test('status：旧形状宿主（含 latest 通道的 rc.2）→ host-outdated；新形状没来源 → no-source', async () => {
   const profileDir = makeProfile(gitLock(LOCAL_SHA))
-  // 0.2.0-rc.2（npm latest 通道）实测形状：BundleInfo 有 version，没有 source/official/availability。
-  // 宿主确实旧、确实查不到上游 → 文案必须引导升级；拿 version 判年代会把它误读成「真·无上游」。
+  // Legacy 0.2.0-rc.2 exposes version without modern capability fields.
+  // An unresolved upstream must recommend a host upgrade rather than claim a modern no-source state.
   const legacy = await createUpdateHost({ self: SELF, profileDir, managerOf: managerOf(undefined, { shape: 'legacy' }), fetchJson: fakeFetch({}) }).status()
   assert.equal(legacy.reason, 'host-outdated')
   assert.equal(legacy.canUpdate, false)
   assert.equal(legacy.current.version, '0.2.0', '旧宿主给的 version 仍用于显示')
-  // 更早的宿主：连 version 都没有（两个字段全缺）→ 同样 host-outdated。
+  // Older hosts missing both version and modern fields are also host-outdated.
   const ancient = await createUpdateHost({ self: SELF, profileDir, managerOf: managerOf(undefined), fetchJson: fakeFetch({}) }).status()
   assert.equal(ancient.reason, 'host-outdated')
-  // 0.2.1-alpha.2 的安装自带条目：official/availability 恒有、没有 source（不是 profile 自有依赖）
-  // → 宿主并不旧，是真·没有可跟的上游，不得把用户引向升级宿主。
+  // Modern built-in bundles have capability fields but no source.
+  // That means no tracked upstream, not an outdated host.
   const shipped = await createUpdateHost({ self: SELF, profileDir, managerOf: managerOf(undefined, { shape: 'modern', official: true, availability: 'installation' }), fetchJson: fakeFetch({}) }).status()
   assert.equal(shipped.reason, 'no-source')
   assert.equal(shipped.current.version, '0.2.0')
-  // 新宿主但包清单读不到（availability: 'missing' + error，连 version 都没有）→ 仍按 no-source：
-  // 这是包的问题，不是宿主年代的问题。
+  // Missing metadata on a modern host is a package no-source issue, not evidence of an old host.
   const unreadable = await createUpdateHost({ self: SELF, profileDir, managerOf: managerOf(undefined, { shape: 'modern', availability: 'missing', version: null, error: { code: 'not-bundle' } }), fetchJson: fakeFetch({}) }).status()
   assert.equal(unreadable.reason, 'no-source')
-  // 宿主的列表里根本没有这个包：真正的「查不到来源」。
+  // An absent package entry genuinely has no discoverable source.
   const notInstalled = () => ({ listBundles: async () => [] })
   const missing = await createUpdateHost({ self: SELF, profileDir, managerOf: notInstalled, fetchJson: fakeFetch({}) }).status()
   assert.equal(missing.reason, 'no-source')
@@ -237,11 +240,11 @@ test('status：旧形状宿主（含 latest 通道的 rc.2）→ host-outdated�
 })
 
 test('status：current.version 优先取宿主 BundleInfo.version，锁文件与自身清单是回退', async () => {
-  // 宿主给了 version：优先于锁文件解析与自身清单（0.2.0-rc.2 起 BundleInfo 就直接给出已装版本）。
+  // The host's installed version outranks lockfile parsing and the plugin manifest.
   const hostVersion = makeProfile(registryLock('0.1.9'))
   const withHost = await createUpdateHost({ self: SELF, profileDir: hostVersion, managerOf: managerOf('whale-girl@0.1.9', { version: '0.2.0' }), fetchJson: fakeFetch({ '/whale-girl': { 'dist-tags': { latest: '0.2.0' } } }) }).status()
   assert.equal(withHost.current.version, '0.2.0')
-  // 宿主没给 version：回退锁文件解析（registry 安装的锁文件版本）。
+  // When the host lacks version metadata, read the registry version from the lockfile.
   const noHost = await createUpdateHost({ self: SELF, profileDir: hostVersion, managerOf: managerOf('whale-girl@0.1.9'), fetchJson: fakeFetch({ '/whale-girl': { 'dist-tags': { latest: '0.2.0' } } }) }).status()
   assert.equal(noHost.current.version, '0.1.9')
 })

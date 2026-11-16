@@ -1,5 +1,5 @@
-# whale-girl bundle patch：向 web 组合挂载 whale-girl（Node half 读写状态/资产，
-# client half 由 __ModuleLoader__ 内核挂载渲染宠物）。
+# Mount the whale-girl bundle in the web composition. The server owns state/assets;
+# the host module loader mounts the client renderer.
 - insert:
     - id: whale-girl
       name: whale-girl

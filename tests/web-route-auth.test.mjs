@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Readable } from 'node:stream'
-import { authenticatedWebServer } from '../lib/web-route-auth.mjs'
+import { authenticatedWebServer } from '../dist/web-route-auth.js'
 
 const lan = '192.168.1.6:3344'
 const local = '127.0.0.1:3344'

@@ -1,10 +1,9 @@
-// Контекст активной сессии для беседы: что питомец знает о текущей работе.
-//归属 lib/src/session-context.mjs：меняется текст/оценка остатка — правь этот файл.
+// Session-context regressions cover the pet's work awareness and remaining-time wording.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  activityLabel, describeSessions, formatDuration, median,
-} from '../lib/src/session-context.mjs'
+  activityLabel, describeConversation, describeSessions, formatDuration, median,
+} from '../dist/core/session-context.js'
 
 const view = (patch = {}) => ({
   id: 's1',
@@ -15,6 +14,21 @@ const view = (patch = {}) => ({
   toolCalls: 0,
   recentTurnMs: [],
   ...patch,
+})
+
+test('conversation excerpts are bounded and only include human input and visible model text', () => {
+  const messages = Array.from({ length: 10 }, (_, index) => ({
+    role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: `${index}: ${'x'.repeat(500)}` }],
+  }))
+  messages.push({ role: 'user', source: { kind: 'agent-instructions' }, content: [{ type: 'text', text: 'private AGENTS' }] })
+  messages.push({ role: 'user', content: [{ type: 'text', text: 'unverified provenance' }] })
+  const text = describeConversation(messages)
+  const excerpts = JSON.parse(text.slice(text.indexOf('\n') + 1))
+  assert.equal(excerpts.length, 6)
+  assert.ok(excerpts.every((item) => item.text.length <= 400))
+  assert.match(excerpts[0].text, /^4:/)
+  assert.doesNotMatch(text, /private AGENTS|unverified provenance/)
+  assert.equal(describeConversation(null), '')
 })
 
 test('activityLabel: activity 账本 → русская подпись', () => {

@@ -1,6 +1,6 @@
 # 版本与更新行（唯一权威）
 
-本文是配置卡片首行**版本与更新行**的权威现状文档：端点与载荷、更新目标怎么定、点更新会发生什么、安全边界、宿主版本要求。README 与决策记录只链接本文件，不重复事实。实现见 [lib/src/update-host.mjs](../lib/src/update-host.mjs)（宿主侧：来源 / 锁文件 / 上游 / 重装）、[lib/src/update.mjs](../lib/src/update.mjs)（spec 归一、锁文件读值、版本比较、三态判断）、[lib/client/update-state.mjs](../lib/client/update-state.mjs)（呈现状态机，纯函数）；决策与备选方案见 [feature/2026-10-05-plugin-update-row.md](../decisions/implemented/feature/2026-10-05-plugin-update-row.md)、[bug-fix/2026-10-16-host-outdated-shape-probe.md](../decisions/implemented/bug-fix/2026-10-16-host-outdated-shape-probe.md)。
+本文是配置卡片首行**版本与更新行**的权威现状文档：端点与载荷、更新目标怎么定、点更新会发生什么、安全边界、宿主版本要求。README 与决策记录只链接本文件，不重复事实。实现见 [src/core/update-host.ts](../src/core/update-host.ts)（宿主侧：来源 / 锁文件 / 上游 / 重装）、[src/core/update.ts](../src/core/update.ts)（spec 归一、锁文件读值、版本比较、三态判断）、[src/client/update-state.ts](../src/client/update-state.ts)（呈现状态机，纯函数）；决策与备选方案见 [feature/2026-10-05-plugin-update-row.md](../decisions/implemented/feature/2026-10-05-plugin-update-row.md)、[bug-fix/2026-10-16-host-outdated-shape-probe.md](../decisions/implemented/bug-fix/2026-10-16-host-outdated-shape-probe.md)。
 
 ## 端点
 
@@ -81,7 +81,7 @@ registry 安装记的是版本范围（pnpm 默认存 `^` 前缀），本来就�
 - **按钮文案里的目标原样显示**：git 安装是短提交、registry 安装是版本号，不额外加 `v`；本地安装用「改跟 `<ref>`…」。
 - 呈现由纯函数挑处理函数（`action.run` 指向检查或更新），组件只调 `action.run()`，不在组件里再判一次状态；交互阶段由 `reduceRow` 状态机推进（`check-started` / `checked` / `check-failed` / `update-started` / `settled`），组件只派发事件。
 - 提示色跟结果走：成功不用报错红；检查没结论（限流/网络）也不用报错红。失败文案用 `--dsw-alias-state-error-primary`（`--dsw-alias-label-error` 在主题里并不存在）；行本身用 `role="group"` + `aria-labelledby`/`aria-describedby` 把标签与状态关联起来。
-- 文案键归 [lib/client/settings-card.mjs](../lib/client/settings-card.mjs)（宿主 locale 的两套字面量），分隔符也走文案表，免得英文界面里冒出全角标点。
+- 文案键归 [src/client/settings-card.ts](../src/client/settings-card.ts)（宿主 locale 的两套字面量），分隔符也走文案表，免得英文界面里冒出全角标点。
 
 ## 验证归属
 

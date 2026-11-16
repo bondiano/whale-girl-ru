@@ -1,5 +1,4 @@
-// 门禁自证：verify-config-sync 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Configuration synchronization gate regressions prove drift is rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -27,7 +26,7 @@ const CLIENT_SRC = `const SETTINGS_NAMESPACE = 'whale-girl'\n${CLIENT_DEFAULTS}`
 const PATCH_SRC = '- insert:\n    - id: whale-girl\n      name: whale-girl\n'
 const PKG_SRC = '{ "name": "whale-girl", "version": "0.1.0" }'
 
-/** 造最小树：config.mjs / client/index.mjs / cordis.patch.yml / package.json。 */
+/** Create a minimal core config, client entry, bundle patch, and package manifest. */
 function makeTree({ config = CONFIG_SRC, client = CLIENT_SRC, patch = PATCH_SRC, pkg = PKG_SRC } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'vcsync-'))
   const mk = (rel, content) => {
@@ -35,8 +34,8 @@ function makeTree({ config = CONFIG_SRC, client = CLIENT_SRC, patch = PATCH_SRC,
     mkdirSync(dirname(p), { recursive: true })
     writeFileSync(p, content)
   }
-  mk('lib/src/config.mjs', config)
-  mk('lib/client/index.mjs', client)
+  mk('src/core/config.ts', config)
+  mk('src/client/index.ts', client)
   mk('cordis.patch.yml', patch)
   mk('package.json', pkg)
   return root

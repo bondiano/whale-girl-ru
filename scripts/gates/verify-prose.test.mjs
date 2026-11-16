@@ -1,5 +1,4 @@
-// 门禁自证：verify-prose 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Prose gate regressions prove forbidden wording is rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -17,7 +16,7 @@ function makeTree(files) {
   return root
 }
 
-// 用最小文件集：门禁只扫 SCAN_FILES 里的，缺的会报「无法读取」——所以给全。
+// Provide every file in SCAN_FILES so missing-file failures do not obscure the tested rule.
 function fullTree(overrides = {}) {
   const files = {
     'AGENTS.md': '规则。\n- 写当前态。',

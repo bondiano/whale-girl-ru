@@ -1,5 +1,4 @@
-// 门禁自证：verify-settings-schema 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Schema gate regressions prove missing bounds/defaults and semantic fields are rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -9,7 +8,7 @@ import { check } from './verify-settings-schema.mjs'
 
 function makeTree(configSrc) {
   const root = mkdtempSync(join(tmpdir(), 'vsch-'))
-  const p = join(root, 'lib', 'src', 'config.mjs')
+  const p = join(root, 'src', 'core', 'config.ts')
   mkdirSync(dirname(p), { recursive: true })
   writeFileSync(p, configSrc)
   return root

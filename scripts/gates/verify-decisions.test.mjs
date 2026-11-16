@@ -1,5 +1,4 @@
-// 门禁自证：verify-decisions 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Decision gate regressions prove malformed records are rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -82,7 +81,7 @@ test('拒绝：文件名不带日期', () => {
   assert.match(errors.join('\n'), /文件名必须形如/)
 })
 
-// ---- 取代检查输出契约（2026-08-10 落地，漏洞 A 审查）----
+// Supersession declaration contracts.
 
 test('接受：部分取代声明带链接 + 目标含回链（双向互链）', () => {
   const a = GOOD.replace('## Decision', '## Decision\n\n本决策部分取代 [B](2026-08-08-b.md) 的 X 描述。')

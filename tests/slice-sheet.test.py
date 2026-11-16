@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""slice-sheet.py 自证测试（工具必须证明它会拒绝非法输入）。
+"""Self-tests for slice-sheet.py, including proof that invalid input is rejected.
 
-运行：python3 tests/slice-sheet.test.py
+Run: python3 tests/slice-sheet.test.py
 """
 import subprocess
 import sys
@@ -34,16 +34,16 @@ def test_normalize_content():
     spec = importlib.util.spec_from_file_location('slice_sheet', SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    # 内容占满 → 规范化后占 scale 比例 + 底对齐
+    # Full-frame content becomes bottom-aligned at the requested scale after normalization.
     img = make_img((256, 256), (200, 100, 50, 255))
     norm = mod.normalize_content(img, 256, scale=0.88, align='bottom')
     assert norm.size == (256, 256)
     ratio = mod.content_ratio(norm)
     assert abs(ratio - 0.88) < 0.02, f'内容占比 {ratio} ≠ 0.88'
-    # 底对齐：内容 bbox 底部接近帧底
+    # Bottom alignment: the content bounding box ends near the bottom of the frame.
     bbox = norm.getchannel('A').getbbox()
     assert bbox[3] >= 250, f'底对齐失败 bbox={bbox}'
-    # 全透明 → None
+    # A fully transparent image returns None.
     assert mod.normalize_content(Image.new('RGBA', (10, 10), (0, 0, 0, 0)), 256) is None
     print('ok - normalize_content（占比/底对齐/空图）')
     return True
@@ -54,23 +54,23 @@ def test_reorder_frames():
     spec = importlib.util.spec_from_file_location('slice_sheet', SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    # 3 帧，每帧不同颜色
+    # Three frames with a different color in each.
     sheet = Image.new('RGBA', (768, 256), (0, 0, 0, 0))
     for i in range(3):
         f = Image.new('RGBA', (256, 256), (i * 80, 50, 50, 255))
         sheet.paste(f, (i * 256, 0))
-    # 重排 2,0,1 → 第 0 帧 = 原第 2 帧（160,50,50）
+    # Reorder 2,0,1: output frame zero must be the original frame two, colored (160,50,50).
     out = mod.reorder_frames(sheet, 3, '2,0,1')
     assert out.size == (768, 256)
     assert out.getpixel((128, 128))[:3] == (160, 50, 50)
-    # 非法顺序拒绝
+    # Reject invalid orders.
     try:
-        mod.reorder_frames(sheet, 3, '0,2')  # 长度不符
+        mod.reorder_frames(sheet, 3, '0,2')  # Wrong length.
         assert False, '长度不符未拒绝'
     except ValueError:
         pass
     try:
-        mod.reorder_frames(sheet, 3, '0,1,1')  # 重复
+        mod.reorder_frames(sheet, 3, '0,1,1')  # Duplicate index.
         assert False, '重复索引未拒绝'
     except ValueError:
         pass
@@ -79,7 +79,7 @@ def test_reorder_frames():
 
 
 def test_cli_requires_mode():
-    # 必须提供一种模式
+    # A mode must be supplied.
     with tempfile.TemporaryDirectory() as td:
         img = make_img((64, 64))
         p = Path(td) / 'in.png'
@@ -92,13 +92,13 @@ def test_cli_requires_mode():
 
 
 def test_cli_single_columns():
-    # single + columns：分栏输出 + 内容占比
+    # Single mode with columns: separate outputs and normalized content ratio.
     import importlib.util
     spec = importlib.util.spec_from_file_location('slice_sheet', SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     with tempfile.TemporaryDirectory() as td:
-        # 左右两半不同颜色
+        # Different colors in the left and right halves.
         img = Image.new('RGBA', (128, 128), (0, 0, 0, 0))
         left = make_img((64, 128), (200, 50, 50, 255))
         right = make_img((64, 128), (50, 200, 50, 255))

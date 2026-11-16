@@ -1,14 +1,14 @@
-// 会话记忆纯逻辑单测（node:test）。归属：src/session-memory.mjs 的行为改动跑本文件。
+// Pure session-memory lineage, trimming, and defensive-normalization regressions.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   SESSIONS_MAX, SUBAGENT_SESSIONS_MAX, TASKS_MAX, LABEL_MAX, LINEAGE_HOPS_MAX,
   emptySessionMemory, normalizeSessionMemory, serializeSessionMemory,
   observeSession, recordTask, memoryFor, memorySnapshot, recallable,
-} from '../lib/src/session-memory.mjs'
+} from '../dist/core/session-memory.js'
 
 const T = 1_000_000
-// 截断断言常量（与实现同值；显式写死防实现悄悄放宽）。
+// Hard-code the truncation limit to detect accidental relaxation in the implementation.
 const TITLE_CLIP = 120
 const TITLE_OVER = 200
 
@@ -84,14 +84,14 @@ test('memoryFor：多级链、链断、环、跳数越界都返回 null（不猜
   mem = observeSession(mem, { id: 'mid', parent: 'root', at: T })
   mem = observeSession(mem, { id: 'leaf', parent: 'mid', at: T })
   assert.equal(memoryFor(mem, 'leaf').distance, 2, '三级链可回读')
-  // 链断：祖先未登记
+  // Broken lineage: the ancestor was never registered.
   mem = observeSession(emptySessionMemory(), { id: 'orphan', parent: 'never-seen', at: T })
   assert.equal(memoryFor(mem, 'orphan'), null)
-  // 环：手改文件造出 parent 环不死循环
+  // A manually corrupted parent cycle must not loop forever.
   mem = observeSession(emptySessionMemory(), { id: 'a', parent: 'b', at: T })
   mem = observeSession(mem, { id: 'b', parent: 'a', at: T })
   assert.equal(memoryFor(mem, 'a'), null)
-  // 跳数：构造 LINEAGE_HOPS_MAX+1 级空链
+  // Build an empty ancestor chain beyond LINEAGE_HOPS_MAX.
   let chain = emptySessionMemory()
   chain = recordTask(chain, 'hop', { label: 'H', at: T })
   let child = 'hop'
@@ -149,11 +149,11 @@ test('normalizeSessionMemory：会话数超上限按 at 淘汰最旧', () => {
 test('observeSession：subagent 标记一旦登记即粘住（后续观测不洗回用户会话）', () => {
   let mem = observeSession(emptySessionMemory(), { id: 'sub', parent: 'u1', subagent: true, at: T })
   assert.equal(mem.sessions.sub.subagent, true)
-  // 后续观测没带标记（如只有 session/event 的标题补登）也不得丢：origin 是会话创建时定死的。
+  // Later observations without the marker must preserve the origin fixed at session creation.
   mem = observeSession(mem, { id: 'sub', title: '子会话', at: T + 1 })
   assert.equal(mem.sessions.sub.subagent, true, '标记粘住')
   assert.equal(mem.sessions.sub.title, '子会话')
-  // 用户会话不写多余字段（缺省即用户会话）。
+  // User sessions omit redundant origin fields; absence means a user session.
   mem = observeSession(mem, { id: 'u1', at: T })
   assert.equal('subagent' in mem.sessions.u1, false)
 })
@@ -161,7 +161,7 @@ test('observeSession：subagent 标记一旦登记即粘住（后续观测不洗
 test('淘汰分预算：子会话再多也挤不掉用户会话（各自按 at 淘汰）', () => {
   let mem = emptySessionMemory()
   for (let i = 0; i < SESSIONS_MAX; i += 1) mem = observeSession(mem, { id: `u${i}`, at: T + i })
-  // 一次密集委派：子会话都比用户会话新——共用一个预算会把最旧的用户会话挤掉。
+  // A burst of newer subagents must not evict older user sessions through a shared budget.
   for (let i = 0; i < SUBAGENT_SESSIONS_MAX + 5; i += 1) {
     mem = observeSession(mem, { id: `sub${i}`, parent: 'u0', subagent: true, at: T + 1000 + i })
   }

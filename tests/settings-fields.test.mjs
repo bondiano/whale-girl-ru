@@ -1,10 +1,10 @@
-// 设置卡字段规格与派生单测（node:test，零依赖）。归属：lib/client/settings-fields.mjs 的
-// 行为改动跑本文件（叶取值、文本↔数组、快照派生、即时写入的深路径提交与 CAS 判据、字段表完整性）。
+// Settings-field regressions cover nested values, line/array conversion, snapshots,
+// immediate deep-path writes, CAS acceptance, and field-table completeness.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CARD_FIELDS, deriveState, leafOf, modelKey, parseLines, sameLeaf, serializeLines, splitModelKey, writeField, writeFields,
-} from '../lib/client/settings-fields.mjs'
+} from '../dist/client/settings-fields.js'
 
 test('leafOf：按点分路径取值，缺失/非对象返回 undefined', () => {
   const v = { enabled: true, walk: { enabled: false, minMs: 3000 }, replies: { feed: ['a'] }, zero: 0 }
@@ -45,16 +45,16 @@ test('deriveState：unavailable / 只读快照的降级', () => {
   const s = deriveState({ status: 'unavailable', writable: false, value: {} }, { size: 110 })
   assert.equal(s.available, false)
   assert.equal(s.writable, false)
-  // value 缺失也不炸（回退默认值）
+  // Missing values safely fall back to defaults.
   assert.equal(deriveState({ status: 'ready', writable: true }, { size: 110 }).fields.size, 110)
 })
 
 /**
- * 假 ConfigFormController：记录 mutate 调用，按 accepted 决定是否落库（CAS 被拒时宿主不改文档）。
- * @param {object} initial 初始文档
+ * Mock ConfigFormController records mutations and applies only accepted writes.
+ * @param {object} initial Initial document.
  * @param {object} [opts]
- * @param {boolean} [opts.accepted] mutate 的返回值（false = revision 过期被拒）
- * @param {boolean} [opts.ignoreWrite] 接受但文档不变（模拟宿主归一化后回读不一致）
+ * @param {boolean} [opts.accepted] Mutation result; false simulates a stale-revision rejection.
+ * @param {boolean} [opts.ignoreWrite] Accept without changing the document to test readback mismatch.
  */
 function makeScope(initial = {}, opts = {}) {
   let snap = { status: 'ready', writable: true, revision: 7, value: { ...initial } }
@@ -111,8 +111,8 @@ test('writeField：逐次写入是独立提交（无暂存、无批量）', asyn
 })
 
 test('writeField：同一 RTT 内连续写入都落库（F1 回归：不接受自带的 CAS 栅栏）', async () => {
-  // 官方控制器按 pendingRevision 给后继写定栅栏；自己传过期的快照 revision 会被宿主按 CAS 拒绝
-  // （第一次其实已落库）→ 误报「未被接受」并丢掉后一次编辑。这里绑定「writeField 不传第二个参数」。
+  // The controller fences subsequent writes using pendingRevision. Passing a stale
+  // snapshot revision would reject the next edit despite the first succeeding; writeField must omit it.
   let revision = 7
   const value = { enabled: true, size: 110 }
   const applied = []
@@ -177,7 +177,7 @@ test('CARD_FIELDS：字段表完整性（路径唯一、种类合法、范围合
       assert.equal(f.min, undefined, `${f.path}: 非数字字段不带范围`)
     }
   }
-  // 三个开关 + 三个数字 + 两个文案池（与界面一致）
+  // UI field coverage: toggles, numbers, and reply pools.
   assert.deepEqual(
     CARD_FIELDS.filter((f) => f.kind === 'toggle').map((f) => f.path),
     ['enabled', 'sessionMemory', 'walk.enabled', 'voice.enabled', 'voice.conversation', 'chat.enabled', 'news.enabled'],

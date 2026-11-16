@@ -1,9 +1,9 @@
-// Голос (src/voice.mjs) — чистые функции: нормализация текста/URL, ключ, сборка TTS-запроса.
+// Pure voice tests cover text/URL normalization, explicit credentials, and speech request construction.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   VOICE_TEXT_MAX, buildSttRequest, buildTtsRequest, normalizeSttUrl, normalizeTtsBaseUrl, normalizeVoiceText, resolveApiKey,
-} from '../lib/src/voice.mjs'
+} from '../dist/core/voice.js'
 
 test('normalizeVoiceText: схлопывает пробелы, обрезает, пустое → null', () => {
   assert.equal(normalizeVoiceText('  привет \n мир '), 'привет мир')
@@ -15,6 +15,7 @@ test('normalizeVoiceText: схлопывает пробелы, обрезает,
 
 test('normalizeTtsBaseUrl: корень API и полный путь, только http(s)', () => {
   assert.equal(normalizeTtsBaseUrl('https://api.openai.com/v1/'), 'https://api.openai.com/v1/audio/speech')
+  assert.equal(normalizeTtsBaseUrl('http://localhost:8880'), 'http://localhost:8880/audio/speech')
   assert.equal(normalizeTtsBaseUrl('http://localhost:8880/v1'), 'http://localhost:8880/v1/audio/speech')
   assert.equal(normalizeTtsBaseUrl('http://localhost:8880/v1/audio/speech'), 'http://localhost:8880/v1/audio/speech')
   assert.equal(normalizeTtsBaseUrl('  ftp://nope  '), null)
@@ -83,6 +84,7 @@ test('buildTtsRequest: ключ из env, кастомные модель/гол
 
 test('normalizeSttUrl: /audio/speech заменяется на /audio/transcriptions, только http(s)', () => {
   assert.equal(normalizeSttUrl('https://api.openai.com/v1'), 'https://api.openai.com/v1/audio/transcriptions')
+  assert.equal(normalizeSttUrl('http://localhost:8880/'), 'http://localhost:8880/audio/transcriptions')
   assert.equal(normalizeSttUrl('https://api.openai.com/v1/audio/speech'), 'https://api.openai.com/v1/audio/transcriptions')
   assert.equal(normalizeSttUrl('ftp://x'), null)
   assert.equal(normalizeSttUrl(''), null)
@@ -99,8 +101,8 @@ test('buildSttRequest: FormData с file/model/language, без утечки кл
   assert.equal(request.url, 'https://api.openai.com/v1/audio/transcriptions')
   assert.equal(request.headers.authorization, 'Bearer sk-secret')
   assert.ok(request.body instanceof FormData)
-  assert.equal(request.body.get('model'), 'whisper-1')
-  assert.equal(request.body.get('language'), 'ru')
+  assert.equal(request.body.get('model'), 'gpt-transcribe')
+  assert.equal(request.body.get('languages[]'), 'ru')
   assert.ok(request.body.get('file') instanceof Blob)
 })
 
@@ -115,4 +117,35 @@ test('buildTtsRequest: instructions только для gpt-4o*-tts', () => {
   assert.equal(JSON.parse(plain.body).instructions, undefined)
   const expressive = buildTtsRequest({ voice: { provider: 'openai', baseUrl: 'https://a/v1', model: 'gpt-4o-mini-tts', instructions: 'мило' }, text: 'привет' })
   assert.equal(JSON.parse(expressive.body).instructions, 'мило')
+})
+
+test('subscription mode fails before credential lookup for STT and TTS', () => {
+  const env = new Proxy({}, { get() { throw new Error('must not access credentials') } })
+  for (const build of [buildTtsRequest, buildSttRequest]) {
+    assert.deepEqual(build({ voice: { provider: 'subscription', apiKeyEnv: 'OPENAI_API_KEY' }, text: 'Привет', audio: Buffer.from('x'), env }), {
+      ok: false, error: 'voice-subscription-unsupported',
+    })
+  }
+})
+
+test('gpt-transcribe uses languages[], legacy models preserve singular language', () => {
+  for (const sttModel of ['gpt-transcribe', 'gpt-transcribe-2026-10-01', 'whisper-1', 'gpt-4o-mini-transcribe']) {
+    const request = buildSttRequest({ voice: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', sttModel, apiKey: 'test-api-key' }, audio: Buffer.from('x') })
+    const modern = sttModel.startsWith('gpt-transcribe')
+    assert.equal(request.body.get(modern ? 'languages[]' : 'language'), 'ru')
+    assert.equal(request.body.get(modern ? 'language' : 'languages[]'), null)
+  }
+})
+
+test('Realtime models cannot be accidentally sent to the legacy speech endpoint', () => {
+  const result = buildTtsRequest({ voice: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-realtime-2.1-mini' }, text: 'Привет' })
+  assert.deepEqual(result, { ok: false, error: 'voice-realtime-required' })
+})
+
+
+test('official OpenAI audio fails before the network when an API key is missing', () => {
+  const voice = { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKeyEnv: 'WHALE_GIRL_TTS_API_KEY' }
+  assert.deepEqual(buildSttRequest({ voice, audio: new Uint8Array([1]), env: {} }), { ok: false, error: 'voice-api-key-required' })
+  assert.deepEqual(buildTtsRequest({ voice: { ...voice, model: 'gpt-4o-mini-tts' }, text: 'Привет', env: {} }), { ok: false, error: 'voice-api-key-required' })
+  assert.equal(buildSttRequest({ voice: { ...voice, baseUrl: 'http://localhost:8880/v1' }, audio: new Uint8Array([1]), env: {} }).ok, true)
 })

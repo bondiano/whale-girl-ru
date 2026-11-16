@@ -1,5 +1,5 @@
-// parseSessionEvent / applySessionView / createSessionView / titleFromLog 单测：
-// GET /whale-girl/sessions 的每会话活动账本（thinking / tool:<name> / waiting / done）。
+// Session view regressions cover parsing, immutable updates, creation, and title extraction
+// for per-session thinking/tool/waiting/done activity.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -8,7 +8,7 @@ import {
   applySessionView,
   applySessionTiming,
   titleFromLog,
-} from '../lib/src/sessions.mjs'
+} from '../dist/core/sessions.js'
 
 const ev = (type, data) => ({ type, seq: 1, time: 1, data })
 
@@ -64,10 +64,10 @@ test('applySessionView 事件驱动更新（不可变；无变化返回原引用
   assert.deepEqual(done, { id: 's1', title: null, activity: 'done', since: 1000 })
   const titled = applySessionView(done, ev('session/title', { title: 'T', messageSeqs: [], source: { kind: 'user' } }))
   assert.deepEqual(titled, { id: 's1', title: 'T', activity: 'done', since: 1000 })
-  // 无变化事件返回原引用
+  // An unchanged event preserves the original reference.
   assert.equal(applySessionView(view, ev('step/start', { turn: 1, step: 1 })), view)
   assert.equal(applySessionView(titled, ev('session/title', { title: 'T', messageSeqs: [], source: { kind: 'user' } })), titled)
-  // 未知事件/异常结构不抛
+  // Unknown events and malformed shapes must not throw.
   assert.equal(applySessionView(view, null), view)
 })
 
@@ -104,13 +104,13 @@ test('applySessionTiming: recentTurnMs хранит последние 5, отр
   view = applySessionTiming(view, ev('turn/start', { turn: 1 }), 10000)
   view = applySessionTiming(view, ev('turn/end', { turn: 1, reason: { kind: 'completed' } }), 20000)
   assert.deepEqual(view.recentTurnMs, [2, 3, 4, 5, 10000])
-  // turn/end без старта: нет длительности — объект не меняется
+  // A turn/end without a start has no duration and preserves the object.
   const bare = createSessionView('s2', 1)
   assert.equal(applySessionTiming(bare, ev('turn/end', { turn: 1 }), 42), bare)
-  // старт позже конца (часы назад): отрицательное время зажимается в 0
+  // Clock rollback clamps a negative duration to zero.
   const backwards = applySessionTiming({ ...createSessionView('s3', 1), turnStartedAt: 100 }, ev('turn/end', { turn: 1 }), 50)
   assert.deepEqual(backwards.recentTurnMs, [0])
-  // события без таймингов возвращают тот же объект
+  // Events unrelated to timing preserve the object.
   const same = createSessionView('s3', 1)
   assert.equal(applySessionTiming(same, ev('session/title', { title: 'x' }), 1), same)
 })

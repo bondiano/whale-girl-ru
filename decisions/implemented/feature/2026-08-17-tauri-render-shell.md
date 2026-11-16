@@ -12,7 +12,7 @@ Status: implemented
 
 - **Tauri v2 为主渲染壳**（`desktop/src-tauri/`）：Rust 负责透明置顶窗（`macOSPrivateApi`
   透明 + `withGlobalTauri`）、资产拉取（ureq 原生 HTTP，webview 零网络零 CORS 面）、
-  引擎子进程桥（spawn `node lib/index.mjs --render-json`，stdout JSON 行 → Tauri 事件；
+  引擎子进程桥（spawn `node src/index.ts --render-json`，stdout JSON 行 → Tauri 事件；
   stdin 收 interact/stop 命令）。webview 跑 `render/` 同一渲染层：`tauri-bridge.js` 把
   `window.whaleGirl` 接到 `window.__TAURI__`（invoke/listen），`renderer.js` 零改动。
 - **Electron 渲染壳保留为遗留**：`lib/render/window.mjs` + `render/preload.cjs` 不动，
@@ -47,5 +47,5 @@ Status: implemented
   WKWebView 写 `~/Library/WebKit` 失败仅告警不阻塞渲染。
 - 渲染层行为对齐 web 版：拖拽用原生 `start_dragging` + delta 兜底（canvas 内逐事件移动，
   `drag_window` clamp 屏幕边界）；walk 状态窗口按 45px/s 平移、撞边反转（Rust 回报）。
-- 引用点：`desktop/src-tauri/`、`desktop/render/tauri-bridge.js`、`desktop/lib/index.mjs`
+- 引用点：`desktop/src-tauri/`、`desktop/render/tauri-bridge.js`、`desktop/src/index.ts`
   （--render-json）、`desktop/package.json`（scripts）、DESIGN/BUILD-RUN（更新）。

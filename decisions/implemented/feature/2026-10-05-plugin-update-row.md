@@ -30,7 +30,7 @@ DSH 不为 profile 安装的插件提供升级入口：`dsh-client-ui-plugin-man
 - **更新动作走宿主的 profile 包管理服务**（`ctx.get('pluginManager').installBundle`）：它取 profile 写锁、跑 pnpm、失败时回滚 manifest 与锁文件，插件自己不碰 profile 文件。重装用的是 **profile 记的原 spec**——分支/标签装完仍跟踪那条线，版本范围装完仍是范围；把 spec 改写成钉死的提交会让这一行从此永远报告「已是最新」。结果按 `application === 'restart-required'` 提示**重启 DeepSeek Harness 生效**（覆盖已安装的包不会热发布，这是宿主既定的生命周期）。
 - **降级路径**：宿主没有该服务、装的是本地路径（无可查询的上游）、或网络失败时，这一行仍显示当前版本，状态文案说明原因，不假装能更新。
 - **profile 目录按三级解析**：`ctx.get('profileContext').dir`（宿主服务，插件管理器自己也用它）→ `DSH_PROFILE_DIR` → `<dshHome>/profiles/<DSH_PROFILE>`；三级都拿不到时不猜，按「未知」呈现。锁文件读不到就等于读不到已安装提交，不会挂着一个错误的判断。
-- **纯逻辑单独成模块** `lib/src/update.mjs`（spec 归一、锁文件读值、版本比较、三态判断），由 `tests/update.test.mjs` 覆盖；网络与宿主调用留在 `lib/index.mjs`。
+- **纯逻辑单独成模块** `src/core/update.ts`（spec 归一、锁文件读值、版本比较、三态判断），由 `tests/update.test.mjs` 覆盖；网络与宿主调用留在 `src/index.ts`。
 
 ## 取代检查
 
@@ -68,5 +68,5 @@ DSH 不为 profile 安装的插件提供升级入口：`dsh-client-ui-plugin-man
 - 更新行的按钮由**纯函数**挑处理函数（`action.run` 指向检查或更新），组件只调 `action.run()`；`tests/update-state.test.mjs` 逐状态断言接线，客户端交互按仓库约定另有 `scripts/verify-client-behavior.mjs` 的 `update-row` 场景（点检查 → 点更新 → 断言真的发出 `POST`）。
 - 读不到组合包启停状态时不动手：宿主对没传 `enabled` 的安装默认启用，动手会把用户关掉的宠物打开。此时报 `unknown-enabled-state`，一次 pnpm 都不跑。
 - 上游 403/429 与「查不到来源」分开：限流走 `rate-limited`，文案说「上游请求受限（GitHub 限流），稍后再试。」；`POST` 复查失败时只报「检查失败」，不报成「更新失败」。
-- 宿主侧实现单独成模块 `lib/src/update-host.mjs`：读 profile 来源/锁文件、查上游三态、走包管理服务执行更新，依赖（包管理器、网络、profile 目录、自身清单）全部注入；`lib/index.mjs` 只把 cordis 服务与网络接进去（更新那段从 ~330 行降到 ~140 行），`.git` 布局解析与状态编排由 `tests/update-host.test.mjs` 用真实临时目录与假依赖覆盖（worktree、packed-refs、游离 HEAD、限流、第二步失败等）。路由层测试只留 HTTP 层与端到端接线。
+- 宿主侧实现单独成模块 `src/core/update-host.ts`：读 profile 来源/锁文件、查上游三态、走包管理服务执行更新，依赖（包管理器、网络、profile 目录、自身清单）全部注入；`src/index.ts` 只把 cordis 服务与网络接进去（更新那段从 ~330 行降到 ~140 行），`.git` 布局解析与状态编排由 `tests/update-host.test.mjs` 用真实临时目录与假依赖覆盖（worktree、packed-refs、游离 HEAD、限流、第二步失败等）。路由层测试只留 HTTP 层与端到端接线。
 - 失败文案用 `--dsw-alias-state-error-primary`（`--dsw-alias-label-error` 在主题里并不存在）；行本身用 `role="group"` + `aria-labelledby`/`aria-describedby` 把标签与状态关联起来。

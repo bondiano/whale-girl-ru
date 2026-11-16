@@ -28,5 +28,5 @@
 ## 验证
 
 ```sh
-node scripts/gates/run.mjs   # 链接可达性 + 决策格式（本地门禁组）
+node scripts/gates/run.mjs   # Local gates for links and decision-record format
 ```

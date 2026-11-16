@@ -1,25 +1,22 @@
-// 门禁自证：verify-spec-states 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
-// v5：权威集合从 EMOJI 表改为 STATE_NAMES（素材全量契约），校验 STATE_TABLE 行漂移，
-// 并校验 spec 状态总表播放行为列 ↔ manifest playback 值（语义级配错盲区）。
+// State-specification gate regressions prove state, priority, and playback drift is rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { check } from './verify-spec-states.mjs'
-import { STATE_NAMES, STATE_TABLE } from '../../lib/client/logic.mjs'
+import { STATE_NAMES, STATE_TABLE } from '../../dist/client/logic.js'
 
 const names = [...STATE_NAMES]
-// 真实 playback 映射（与 assets/manifest.json 一致；测试用简化全 loop + idle blink + walk pingpong）
+// Playback fixture follows the manifest, simplified to loop except idle blink and walk pingpong.
 const PLAYBACK = Object.fromEntries(names.map((s) => [s, s === 'idle' ? 'blink' : s === 'walk' ? 'pingpong' : s === 'wake' || s === 'error' ? 'once' : 'loop']))
-// 与 STATE_TABLE 行序一致的优先级列表（state-machine.md 格式）。
+// Priority fixture uses the state-machine document format and STATE_TABLE row order.
 function goodPriority() {
   const rows = STATE_TABLE.map((r, i) => `${i + 1}. \`${r.state}\``)
   return ['## 优先级（STATE_TABLE 行序，文法单源）', '', ...rows, '', '## 状态转换语义', ''].join('\n')
 }
 
-/** 构造一份与当前 STATE_NAMES 完全一致的 spec 总表（状态总表后紧跟 h3 小节表，验证不误读）。 */
+/** Build a complete state table followed by an h3 table, proving the parser stops at its boundary. */
 function goodSpec(playback = PLAYBACK) {
   const rows = names.map((s) => `| \`${s}\` | 触发 | 1 | — | \`${playback[s]}\` | 画面 |`)
   return [
@@ -69,7 +66,7 @@ test('接受：spec 播放行为列与 manifest playback 一致', () => {
 })
 
 test('拒绝：spec 播放行为列 ≠ manifest playback（语义级配错：idle 配 loop）', () => {
-  const specBad = goodSpec({ ...PLAYBACK, idle: 'loop' }) // spec 说 idle=loop
+  const specBad = goodSpec({ ...PLAYBACK, idle: 'loop' }) // Document idle as loop.
   const manifest = { characters: { 'whale-girl': { states: Object.fromEntries(names.map((s) => [s, { sheet: `${s}.png`, frames: 2, fps: 4, playback: PLAYBACK[s] }])) } }, default: 'whale-girl' }
   const { ok, errors } = check(makeTree(specBad, manifest))
   assert.equal(ok, false)
@@ -129,7 +126,7 @@ test('接受：优先级列表行序与 STATE_TABLE 一致', () => {
 })
 
 test('拒绝：优先级列表行序 ≠ STATE_TABLE（文档与文法单源漂移）', () => {
-  // idle 提到首位——文档行序与 STATE_TABLE 不一致即红
+  // Move idle first to produce a documented priority mismatch.
   const tableOrder = STATE_TABLE.map((r) => r.state)
   const reordered = ['idle', ...tableOrder.filter((s) => s !== 'idle')]
   const bad = ['## 优先级（STATE_TABLE 行序，文法单源）', '', ...reordered.map((s, i) => `${i + 1}. \`${s}\``), ''].join('\n')

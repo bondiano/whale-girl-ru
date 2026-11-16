@@ -1,6 +1,5 @@
-// 门禁自证：check-generated（client.js 新鲜度）必须证明它会拒绝（法则 2）。
-// 在临时根构造最小 client 源 → 生成 → 篡改 → 断言 --check 拒绝；未篡改则通过。
-// esbuild 不可用时跳过（该门禁声明消费构建产物，缺失外部工具时明确跳过）。
+// Generator regression: create minimal source, build, tamper, and verify --check rejects drift.
+// Untampered output passes; unavailable esbuild is an explicit skip.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
@@ -12,8 +11,9 @@ const ENTRY = `export function apply() {}\n`
 
 function makeRoot({ entry = ENTRY } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'gen-'))
-  mkdirSync(join(root, 'lib', 'client'), { recursive: true })
-  writeFileSync(join(root, 'lib', 'client', 'index.mjs'), entry)
+  mkdirSync(join(root, 'src', 'client'), { recursive: true })
+  mkdirSync(join(root, 'lib'), { recursive: true })
+  writeFileSync(join(root, 'src', 'client', 'index.ts'), entry)
   return root
 }
 

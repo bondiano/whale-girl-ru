@@ -1,8 +1,8 @@
-// client 纯逻辑单测（node:test）。归属：client/logic.mjs 的行为改动跑本文件。
-// v2：零负反馈——无 hunger/mood 属性状态；情绪只由事件瞬发 + 互动喜悦。
+// Pure client logic regressions: emotions derive from event bursts and interaction joy,
+// without hunger or persistent negative-mood state.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS, shouldDimForDialogs, voiceErrorMessage } from '../lib/client/logic.mjs'
+import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS, shouldDimForDialogs, voiceErrorMessage, chatBubbleDuration } from '../dist/client/logic.js'
 
 const IDLE = { activity: { name: 'idle', until: 0 }, dragging: false, transient: null, sleeping: false, joyUntil: 0, now: 1000 }
 
@@ -71,7 +71,7 @@ test('确定性：显式 now 时相同输入相同输出', () => {
 test('TRANSIENT_MS/JOY_MS 与 STATE_NAMES 完整性（15 状态全量契约）', () => {
   assert.equal(TRANSIENT_MS, 1500)
   assert.equal(JOY_MS, 1600)
-  assert.equal(ROUND_CELEBRATE_MS, 4000) // 回合完成庆祝窗口
+  assert.equal(ROUND_CELEBRATE_MS, 4000) // Turn-completion celebration window.
   assert.deepEqual(
     [...STATE_NAMES].sort(),
     ['idle', 'working', 'celebrate', 'error', 'disappointed', 'joy', 'eat', 'play', 'drag', 'walk', 'sleep', 'wake', 'welcome', 'think', 'wait'].sort(),
@@ -80,7 +80,7 @@ test('TRANSIENT_MS/JOY_MS 与 STATE_NAMES 完整性（15 状态全量契约）',
 
 test('PLAYBACK_MODES：封闭枚举 + 帧数下限（播放器数据驱动契约）', () => {
   assert.deepEqual([...PLAYBACK_MODES].sort(), ['blink', 'loop', 'once', 'pingpong'].sort())
-  // 帧数下限：loop≥1、pingpong≥2、once≥1、blink≥2
+  // Minimum frames: loop>=1, pingpong>=2, once>=1, blink>=2.
   assert.equal(PLAYBACK_MIN_FRAMES.loop, 1)
   assert.equal(PLAYBACK_MIN_FRAMES.pingpong, 2)
   assert.equal(PLAYBACK_MIN_FRAMES.once, 1)
@@ -88,38 +88,38 @@ test('PLAYBACK_MODES：封闭枚举 + 帧数下限（播放器数据驱动契约
 })
 
 test('会话感知：等待批准 wait 优先于思考陪伴 think（都需要用户注意）', () => {
-  // now=2500 → 时间片 think 段，sessionThink 时思考陪伴
+  // At now=2500, the thinking phase provides session companionship.
   assert.equal(pickState({ ...IDLE, sessionThink: true, now: 2500 }), 'think')
   assert.equal(pickState({ ...IDLE, sessionWait: true }), 'wait')
   assert.equal(pickState({ ...IDLE, sessionThink: true, sessionWait: true }), 'wait')
 })
 
 test('会话感知：思考陪伴覆盖 sleep/walk/joy（会话活跃时保持清醒陪伴）', () => {
-  // now 取 think 段，验证陪伴优先于睡眠/漫游/喜悦
+  // Use the thinking phase to verify companionship outranks sleep, wandering, and joy.
   assert.equal(pickState({ ...IDLE, sessionThink: true, sleeping: true, now: 2500 }), 'think')
   assert.equal(pickState({ ...IDLE, sessionThink: true, walking: true, now: 2500 }), 'think')
   assert.equal(pickState({ ...IDLE, sessionThink: true, joyUntil: 1500, now: 2500 }), 'think')
 })
 
 test('工作陪伴（v3）：workingActive 插曲 > think 常态，不依赖 activity', () => {
-  // think 是会话思考常态（不依赖 Node half activity——思考阶段 activity 是 idle）
+  // think is the normal session-thinking state, independent of idle server activity.
   assert.equal(pickState({ ...IDLE, sessionThink: true, activity: { name: 'idle', until: 0 } }), 'think')
-  // working 插曲激活时优先显示 working（随机节奏器注入 workingActive）
+  // An active working interlude outranks think.
   assert.equal(pickState({ ...IDLE, sessionThink: true, workingActive: true }), 'working')
-  // 无 sessionThink 时插曲撤防（纯任务也不显示 working——working 不是任务指示灯）
+  // Without sessionThink, disable working interludes; tasks alone do not activate them.
   assert.equal(pickState({ ...IDLE, workingActive: true, sessionThink: false }), 'working')
   assert.equal(pickState({ ...IDLE, activity: { name: 'working', until: 0 } }), 'idle')
 })
 
 test('回合完成庆祝（v3）：celebrateUntil 窗口内播 celebrate，且不抢互动/等待', () => {
-  // 回合完成窗口内 → celebrate（高于 think/working 陪伴）
+  // Turn completion celebrates above think and working companionship.
   assert.equal(pickState({ ...IDLE, sessionThink: true, celebrateUntil: 2000, now: 1000 }), 'celebrate')
   assert.equal(pickState({ ...IDLE, celebrateUntil: 2000, now: 1000 }), 'celebrate')
-  // 窗口过期 → 回底层（think/陪伴）
+  // After the celebration window, return to the underlying thinking state.
   assert.equal(pickState({ ...IDLE, sessionThink: true, celebrateUntil: 500, now: 1000 }), 'think')
-  // 不抢互动：用户点击喂食时先播 eat（互动优先）
+  // User feeding plays eat before turn-completion celebration.
   assert.equal(pickState({ ...IDLE, transient: 'eat', celebrateUntil: 2000, now: 1000 }), 'eat')
-  // 不抢等待批准（wait 需要用户注意）
+  // Approval waiting retains priority because it needs user attention.
   assert.equal(pickState({ ...IDLE, sessionWait: true, celebrateUntil: 2000, now: 1000 }), 'wait')
 })
 
@@ -152,7 +152,7 @@ test('deriveSessionMood：空/未就绪快照与缺字段行安全（服务不�
   assert.equal(mood.thinking, false)
   assert.equal(mood.waiting, false)
   assert.deepEqual(mood.titles, [])
-  // pending 值枚举：approval/plan-review/question 任一都算等待
+  // Any approval, plan-review, or question pending value counts as waiting.
   for (const p of ['approval', 'plan-review', 'question']) {
     assert.equal(deriveSessionMood({ byId: { s1: { pendingInteraction: p } } }).waiting, true)
   }
@@ -160,32 +160,31 @@ test('deriveSessionMood：空/未就绪快照与缺字段行安全（服务不�
 
 test('STATE_TABLE 文法单源：表内状态全部在 STATE_NAMES，idle 兜底在末行', () => {
   const last = STATE_TABLE[STATE_TABLE.length - 1]
-  assert.equal(last.state, 'idle') // 兜底必须最后
-  assert.equal(last.when({}), true) // 恒命中
+  assert.equal(last.state, 'idle') // The fallback row must remain last.
+  assert.equal(last.when({}), true) // Always matches.
   for (const row of STATE_TABLE) {
-    // burst 是动态解析（resolve 到 activity.name），其可能值也须在 STATE_NAMES
+    // Dynamic burst resolutions must also belong to STATE_NAMES.
     for (const s of ['welcome', 'celebrate', 'error', 'disappointed']) assert.ok(STATE_NAMES.includes(s))
     if (row.state !== 'burst') assert.ok(STATE_NAMES.includes(row.state), `STATE_TABLE 状态 ${row.state} 不在 STATE_NAMES`)
   }
 })
 
 test('STATE_TABLE 行序即优先级：手动验证关键竞争', () => {
-  // drag 最高：其他条件全命中时仍返回 drag
+  // drag wins even when every other condition matches.
   assert.equal(pickState({ ...IDLE, dragging: true, transient: 'eat', sessionWait: true, sleeping: true, walking: true }), 'drag')
-  // burst 高于瞬发：welcome 窗口内点 eat 仍播 welcome
+  // An active welcome burst outranks an eat transient.
   assert.equal(pickState({ ...IDLE, activity: { name: 'welcome', until: 5000 }, transient: 'eat' }), 'welcome')
   // wait > think > working
   assert.equal(pickState({ ...IDLE, sessionWait: true, sessionThink: true, activity: { name: 'working', until: 0 } }), 'wait')
-  // think > sleep（会话活跃保持清醒；now 取 think 段）
+  // Active-session thinking outranks sleep; use the thinking phase.
   assert.equal(pickState({ ...IDLE, sessionThink: true, sleeping: true, now: 2500 }), 'think')
-  // celebrate（回合完成窗口）低于 wait、高于 think
+  // Turn-completion celebration ranks below wait and above think.
   assert.equal(pickState({ ...IDLE, sessionThink: true, celebrateUntil: 2000, now: 1000 }), 'celebrate')
 })
 
 test('STATE_TABLE 全序由 verify-spec-states 门禁守护（state-machine.md 优先级列表 ↔ 行序）', () => {
-  // 行序一致性由门禁机械校验（state-machine.md 优先级列表为行序家）——单测不拷贝 order
-  // 数组（避免第三个家，见决策记录 2026-08-10-doc-system-single-source-and-gates.md）。
-  // 此处只保留结构性断言：表非空、含 burst 动态解析行、末行 idle 兜底。
+  // The gate checks documented priority against STATE_TABLE, avoiding a third
+  // copy of the order here. Assert only a nonempty table, dynamic burst row, and final idle fallback.
   assert.ok(STATE_TABLE.length >= 10)
   assert.equal(STATE_TABLE.some((r) => r.state === 'burst' && typeof r.resolve === 'function'), true)
   const last = STATE_TABLE[STATE_TABLE.length - 1]
@@ -194,14 +193,14 @@ test('STATE_TABLE 全序由 verify-spec-states 门禁守护（state-machine.md �
 })
 
 test('拖拽放下缓冲：dragReleaseUntil 内短暂回 idle，再进入底层状态', () => {
-  // 放下缓冲期内：即使有 working 插曲/思考陪伴也先 idle
+  // The release buffer holds idle even when thinking or working companionship is active.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 1000, sessionThink: true, workingActive: true }), 'idle')
-  // 缓冲过期后：进入底层（working 插曲优先于 think）
+  // After the buffer expires, working interludes outrank think.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 3000, sessionThink: true, workingActive: true }), 'working')
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 3000, sessionThink: true, workingActive: false }), 'think')
 })
 
-// ---- v3 纯函数调度面（确定性：now/random 显式注入）----
+// Deterministic scheduling functions receive explicit time and random sources.
 
 test('nextWorkingRhythm：会话不活跃时插曲撤防', () => {
   assert.deepEqual(
@@ -212,13 +211,13 @@ test('nextWorkingRhythm：会话不活跃时插曲撤防', () => {
 
 test('nextWorkingRhythm：think 常态 → 随机间隔后插 working（区间边界用注入随机源）', () => {
   const base = { now: 1000, sessionThink: true, working: { active: false, until: 0 } }
-  // r=0 → 最短间隔；r→1⁻ → 接近最长间隔（区间断言，不依赖取整细节）
+  // r=0 selects the shortest wait; r approaching 1 approaches the longest, independent of rounding.
   const min = nextWorkingRhythm({ ...base, random: () => 0 })
   assert.equal(min.active, true)
   assert.equal(min.until, 1000 + 12000) // WORKING_MIN_WAIT_MS
   const max = nextWorkingRhythm({ ...base, random: () => 0.999 })
   assert.equal(max.active, true)
-  assert.ok(max.until >= 1000 + 12000 && max.until <= 1000 + 30000) // WORKING_MAX_WAIT_MS 区间
+  assert.ok(max.until >= 1000 + 12000 && max.until <= 1000 + 30000) // WORKING_MAX_WAIT_MS interval.
 })
 
 test('nextWorkingRhythm：working 中 → 随机时长后回 think', () => {
@@ -228,23 +227,23 @@ test('nextWorkingRhythm：working 中 → 随机时长后回 think', () => {
   assert.equal(short.until, 5000 + 2500) // WORKING_MIN_DUR_MS
   const long = nextWorkingRhythm({ ...base, random: () => 0.999 })
   assert.equal(long.active, false)
-  assert.ok(long.until >= 5000 + 2500 && long.until <= 5000 + 6000) // WORKING_MAX_DUR_MS 区间
+  assert.ok(long.until >= 5000 + 2500 && long.until <= 5000 + 6000) // WORKING_MAX_DUR_MS interval.
 })
 
 test('detectTurnCompleted：running true→false 边沿 → flips（含当前/子会话）', () => {
   const snap1 = { byId: { s1: { displayTitle: '甲', running: true }, s2: { running: false } } }
   const first = detectTurnCompleted(snap1, new Map())
-  assert.deepEqual(first.flips, []) // 首帧：仅建位表，不触发
+  assert.deepEqual(first.flips, []) // The initial snapshot seeds the state map without triggering edges.
   assert.equal(first.prevRunning.get('s1'), true)
   assert.equal(first.prevRunning.get('s2'), false)
-  // s1 完成（running→false）→ flips；s2 保持 false → 不触发
+  // Only s1's running-to-idle transition emits an edge; unchanged s2 does not.
   const snap2 = { byId: { s1: { displayTitle: '甲', running: false }, s2: { running: false } } }
   const second = detectTurnCompleted(snap2, first.prevRunning)
   assert.deepEqual(second.flips.map((f) => f.id), ['s1'])
-  // 再次 false → 不触发（无新边沿）
+  // A repeated idle snapshot has no new edge.
   const third = detectTurnCompleted(snap2, second.prevRunning)
   assert.deepEqual(third.flips, [])
-  // 重新 running → 再完成 → 再次触发（新一轮 turn）
+  // A new running/completed cycle emits another turn edge.
   const snap3 = { byId: { s1: { displayTitle: '甲', running: true } } }
   const fourth = detectTurnCompleted(snap3, third.prevRunning)
   assert.deepEqual(fourth.flips, [])
@@ -257,7 +256,7 @@ test('detectTurnCompleted：空/损坏快照安全 + 缺行清理', () => {
   assert.deepEqual(detectTurnCompleted({ byId: {} }, new Map()).flips, [])
   const r = detectTurnCompleted({ byId: { s1: null } }, new Map())
   assert.deepEqual(r.flips, [])
-  // 会话从快照消失（删除）：位表清理，避免重开后旧位误判
+  // Remove deleted sessions from the state map so reopening cannot reuse stale bits.
   const prev = new Map([['s1', true], ['s2', false]])
   const after = detectTurnCompleted({ byId: { s2: { running: false } } }, prev)
   assert.equal(after.prevRunning.has('s1'), false)
@@ -267,21 +266,20 @@ test('detectTurnCompleted：空/损坏快照安全 + 缺行清理', () => {
 test('shouldWake：sleep→非 sleep 且非拖拽/无瞬发 → 播 wake', () => {
   assert.equal(shouldWake('sleep', 'think', {}), true)
   assert.equal(shouldWake('sleep', 'working', {}), true)
-  // 仍在 sleep / 非 sleep 出发 → 不播
+  // Do not wake while still sleeping or when the previous state was not sleep.
   assert.equal(shouldWake('sleep', 'sleep', {}), false)
   assert.equal(shouldWake('think', 'idle', {}), false)
-  // 拖拽打断 / 瞬发占用 → 不播
+  // Dragging or an occupied transient suppresses wake playback.
   assert.equal(shouldWake('sleep', 'think', { dragging: true }), false)
   assert.equal(shouldWake('sleep', 'think', { transient: 'eat' }), false)
 })
 
 test('nextBlinkAt：随机间隔内返回下次眨眼时刻（区间边界用注入随机源）', () => {
-  // r=0 → 最短间隔；r→1⁻ → 接近最长间隔
+  // r=0 selects the shortest interval; r approaching 1 approaches the longest.
   const min = nextBlinkAt({ now: 1000, random: () => 0 })
   assert.equal(min, 1000 + 3000) // BLINK_MIN_INTERVAL_MS
   const max = nextBlinkAt({ now: 1000, random: () => 0.999 })
-  assert.ok(max >= 1000 + 3000 && max <= 1000 + 9000) // BLINK_MAX_INTERVAL_MS 区间
-  // 每次调用随机独立（不同随机源值 → 不同结果）
+  assert.ok(max >= 1000 + 3000 && max <= 1000 + 9000) // BLINK_MAX_INTERVAL_MS range; each call uses its own injected random value.
   const a = nextBlinkAt({ now: 0, random: () => 0.2 })
   const b = nextBlinkAt({ now: 0, random: () => 0.8 })
   assert.notEqual(a, b)
@@ -291,7 +289,7 @@ test('nextFacingAt：随机转身间隔（区间边界用注入随机源）', ()
   const min = nextFacingAt({ now: 1000, random: () => 0 })
   assert.equal(min, 1000 + 10000) // FACING_MIN_INTERVAL_MS
   const max = nextFacingAt({ now: 1000, random: () => 0.999 })
-  assert.ok(max >= 1000 + 10000 && max <= 1000 + 25000) // FACING_MAX_INTERVAL_MS 区间
+  assert.ok(max >= 1000 + 10000 && max <= 1000 + 25000) // FACING_MAX_INTERVAL_MS range.
   const a = nextFacingAt({ now: 0, random: () => 0.2 })
   const b = nextFacingAt({ now: 0, random: () => 0.8 })
   assert.notEqual(a, b)
@@ -320,10 +318,10 @@ test('facingFromDrag：左拖后纵移不转身，横向反转仍即时生效', 
   assert.deepEqual(actual, [1, 1, 1, -1, -1, 1])
 })
 
-// ---- v6 交互醒觉（sleep → drag → 放下立即回 sleep 的修复）----
+// Interaction wakefulness regressions prevent immediate sleep after release.
 
 test('wakeFromInteraction：视觉非 sleep 交互 → 重置空闲、不播 wake', () => {
-  // 视觉非 sleep（如会话活跃 → think）：即使空闲超时派生 sleeping=true，交互也不播 wake
+  // If the visible state is not sleep, an idle-time sleeping flag must not trigger wake.
   assert.deepEqual(wakeFromInteraction({ visuallySleeping: false }), { sleeping: false, wake: false })
 })
 
@@ -332,34 +330,34 @@ test('wakeFromInteraction：视觉 sleep 动画中交互 → 重置空闲、附�
 })
 
 test('醒觉判定绑定视觉 sleep 动画：sleeping 派生变量不参与（回归：非 sleep 动画拖拽不播 wake）', () => {
-  // 契约：wake 判定输入是「交互开始时刻的视觉状态」（animState === 'sleep'），
-  // 不是 sleeping 派生变量——会话活跃时视觉已离开 sleep 但 sleeping 仍 true，不播 wake。
+  // Wake eligibility uses the visual state at interaction start, not the derived
+  // sleeping flag, which may remain true during visible session-thinking companionship.
   assert.equal(wakeFromInteraction({ visuallySleeping: false }).wake, false)
   assert.equal(wakeFromInteraction({ visuallySleeping: true }).wake, true)
 })
 
 test('交互醒觉集成：sleep → drag → 放下（sleeping 归零）→ 缓冲过期后不回 sleep', () => {
-  // 放下瞬间：视觉 sleep（交互开始时刻 animState==='sleep'）→ wakeFromInteraction 归零 + 播 wake
+  // Releasing a pet picked up while visibly asleep clears sleeping and starts wake.
   const afterRelease = wakeFromInteraction({ visuallySleeping: true })
   assert.equal(afterRelease.sleeping, false)
   assert.equal(afterRelease.wake, true)
-  // 放下缓冲期内：wake 让位缓冲——睡着被拖起直接播 wake（不先 idle 缓冲）
+  // Wake overrides the release idle buffer for a pet picked up while sleeping.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 1000, sleeping: afterRelease.sleeping, transient: 'wake' }), 'wake')
-  // 对照：醒着拖拽（无 wake transient）→ 缓冲期内仍回 idle
+  // Dragging an awake pet still uses the idle release buffer.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 1000, sleeping: false, transient: null }), 'idle')
-  // 缓冲过期、wake 播完（宿主 resetTransient → transient=null）：sleeping 已归零 → 底层状态而非 sleep
+  // Once buffer and wake finish, the cleared sleeping flag yields the underlying state.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 3000, sleeping: afterRelease.sleeping, transient: null }), 'idle')
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 3000, sleeping: afterRelease.sleeping, transient: null, sessionThink: true }), 'think')
-  // 对照：若 sleeping 未归零（旧行为）→ 缓冲过期立即回 sleep（本修复消灭的链路）
+  // Regression control: an uncleared sleeping flag would immediately return to sleep.
   assert.equal(pickState({ ...IDLE, dragReleaseUntil: 2500, now: 3000, sleeping: true, transient: null }), 'sleep')
 })
 
 test('交互醒觉：feed/play 结束后同样不回 sleep（sleeping 已归零）', () => {
-  // 互动瞬间视觉 sleep → 归零；eat 播完 + joy 结束后进入底层状态而非 sleep
+  // Interaction while visibly asleep resets idle time; eat and joy finish into the underlying state.
   const afterRelease = wakeFromInteraction({ visuallySleeping: true })
   assert.equal(pickState({ ...IDLE, sleeping: afterRelease.sleeping, joyUntil: 1500 }), 'joy')
   assert.equal(pickState({ ...IDLE, sleeping: afterRelease.sleeping, joyUntil: 800 }), 'idle')
-  // 对照：旧行为（sleeping 未归零）→ joy 结束后立即回 sleep
+  // Regression control: leaving sleeping set returns to sleep as soon as joy ends.
   assert.equal(pickState({ ...IDLE, sleeping: true, joyUntil: 800 }), 'sleep')
 })
 
@@ -437,9 +435,32 @@ test('voiceErrorMessage：коды распознавания → понятны
     assert.ok(message.length > 10, `${code}: не заглушка`)
     assert.notEqual(message, voiceErrorMessage('unknown'), `${code}: не общий дефолт`)
   }
-  // not-allowed и service-not-allowed — одна и та же проблема доступа к микрофону.
+  // Both not-allowed and service-not-allowed indicate microphone permission failure.
   assert.equal(voiceErrorMessage('not-allowed'), voiceErrorMessage('service-not-allowed'))
   assert.match(voiceErrorMessage('not-allowed'), /микрофон/i)
-  // Неизвестный/пустой код — общий совет, а не пустая строка.
+  // Unknown or empty error codes still produce actionable feedback.
   for (const code of ['', null, undefined, 'что-то']) assert.equal(voiceErrorMessage(code), voiceErrorMessage('unknown'))
+})
+
+
+test('subscription audio failure explains product boundary and separate API billing', () => {
+  const message = voiceErrorMessage('voice-subscription-unsupported')
+  assert.match(message, /Подписка ChatGPT/)
+  assert.match(message, /отдельно оплачиваемый OpenAI API/)
+})
+
+
+test('model voice failure names the recovery instead of silently changing engines', () => {
+  assert.match(voiceErrorMessage('voice-api-key-required'), /API-ключ/)
+  assert.match(voiceErrorMessage('tts-timeout'), /не ответил вовремя/)
+  assert.match(voiceErrorMessage('tts-connection-failed'), /подключиться/)
+  assert.match(voiceErrorMessage('tts-invalid-audio'), /некорректное аудио/)
+})
+
+
+test('chat replies allow at least thirty seconds and scale reading time up to two minutes', () => {
+  assert.equal(chatBubbleDuration('Привет 🐳', 15000), 30000)
+  assert.equal(chatBubbleDuration('x'.repeat(200), 15000), 53000)
+  assert.equal(chatBubbleDuration('x'.repeat(700), 15000), 120000)
+  assert.equal(chatBubbleDuration('x', 45000), 45000)
 })

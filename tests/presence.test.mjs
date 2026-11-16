@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PRESENCE_TTL_MS, pokePresence, companionOnline } from '../lib/src/presence.mjs'
+import { PRESENCE_TTL_MS, pokePresence, companionOnline } from '../dist/core/presence.js'
 
 test('presence TTL is a positive finite window', () => {
   assert.ok(Number.isFinite(PRESENCE_TTL_MS) && PRESENCE_TTL_MS > 0)
@@ -9,7 +9,7 @@ test('presence TTL is a positive finite window', () => {
 test('online poke extends the presence window from now', () => {
   const until = pokePresence(0, 1000, true)
   assert.equal(until, 1000 + PRESENCE_TTL_MS)
-  // 连续续命窗口顺延（不叠加，只取最新）
+  // Repeated presence heartbeats extend to the latest window without stacking durations.
   const next = pokePresence(until, 1000 + 10000, true)
   assert.equal(next, 1000 + 10000 + PRESENCE_TTL_MS)
 })

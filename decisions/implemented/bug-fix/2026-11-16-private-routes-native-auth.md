@@ -8,7 +8,7 @@ Raw plugin HTTP routes bypass the host's core API admission. A LAN listener can 
 
 ## Decision
 
-Whale Girl registers private routes through its packaged `lib/web-route-auth.mjs` facade. For managed LAN mode, native remote authorities, or a non-loopback listener, each request must pass `connection.requestRejection` before its handler runs. Missing admission fails closed with 503. Only after admission are Host and Origin adapted for existing loopback guards. The original request headers remain unchanged.
+Whale Girl registers private routes through its packaged `src/web-route-auth.ts` facade. For managed LAN mode, native remote authorities, or a non-loopback listener, each request must pass `connection.requestRejection` before its handler runs. Missing admission fails closed with 503. Only after admission are Host and Origin adapted for existing loopback guards. The original request headers remain unchanged.
 
 Private-only desktop transports retain their existing behavior. The facade does not modify the host server or core API routes.
 

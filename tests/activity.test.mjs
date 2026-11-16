@@ -1,7 +1,7 @@
-// src/activity.mjs 单测（node:test）。归属：活动推导逻辑改动跑本文件。
+// Activity derivation regression tests for src/core/activity.ts.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveActivity, BURST_MS, mergeCelebrate } from '../lib/src/activity.mjs'
+import { deriveActivity, BURST_MS, mergeCelebrate } from '../dist/core/activity.js'
 
 test('无任务 → idle（working=false，无 burst）', () => {
   const r = deriveActivity({ tasks: [], nowMs: 1000 })
@@ -66,11 +66,11 @@ test('known 收缩到当前任务集合（残留终态任务时不线性增长�
 })
 
 test('killed 中性：running→killed 的消失兜底不触发庆祝', () => {
-  // poll N：t1 running（wasWorking=true）→ poll N+1：t1 消失（用户取消后列表清空）
+  // A running task disappears on the next poll after cancellation clears the list.
   const known = new Map([['t1', 'running']])
-  // 先经过 killed 状态（本轮 sawKill 置位）
+  // Observe killed first so the current poll records the cancellation.
   deriveActivity({ tasks: [{ id: 't1', status: 'killed' }], nowMs: 1000, known, wasWorking: true })
-  // 下一轮任务消失：兜底不得因上一轮 killed 发庆祝
+  // When the task disappears next, the previous killed state must not trigger celebration.
   const r = deriveActivity({ tasks: [], nowMs: 2000, known, wasWorking: false })
   assert.equal(r.burst, null)
 })
@@ -88,13 +88,13 @@ test('mergeCelebrate：无派生 burst 时事件窗口直接生效（F3 关闭�
 
 test('mergeCelebrate：双源 celebrate 取更晚窗口（不叠加延长）', () => {
   const burst = { name: 'celebrate', until: 6000 }
-  assert.deepEqual(mergeCelebrate(burst, 5000, 1000), burst) // 事件窗口更早 → 保留派生
-  assert.deepEqual(mergeCelebrate(burst, 8000, 1000), { name: 'celebrate', until: 8000 }) // 事件窗口更晚 → 取事件
+  assert.deepEqual(mergeCelebrate(burst, 5000, 1000), burst) // An earlier event window preserves the derived window.
+  assert.deepEqual(mergeCelebrate(burst, 8000, 1000), { name: 'celebrate', until: 8000 }) // A later event window wins.
 })
 
 test('mergeCelebrate：error burst 优先——并发完成不盖掉失败', () => {
   const burst = { name: 'error', until: 6000 }
-  assert.deepEqual(mergeCelebrate(burst, 8000, 1000), burst) // 事件 celebrate 更晚也不替换 error
+  assert.deepEqual(mergeCelebrate(burst, 8000, 1000), burst) // Even a later event celebration must not replace an error.
 })
 
 test('mergeCelebrate：事件窗口已过期则保持原 burst（不影响轮询路径）', () => {

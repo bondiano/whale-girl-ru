@@ -1,29 +1,27 @@
-// 门禁：client half 不得引用已退役的宿主缝名（verify-client-seams）。
-// 拒绝不变量：lib/client/**（含生成物 lib/client.js）出现已从 dsh 客户端移除的缝名——
-// 注入一个宿主不存在的服务会让整个 client 条目永久 pending（cordis 严格注入），
-// 宠物与卡片一起消失，且只在 web 启动面板可见：静默失败，故用门禁兜住。
-// 只读、确定性。
+// Reject retired host client service names in source and the generated bundle.
+// Cordis strictly waits for injected services; a retired dependency can leave the
+// entire pet and settings card pending indefinitely. This check is read-only and deterministic.
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 
-/** 已退役的客户端缝名 → 现行替代（本表即契约；改 dsh 客户端缝时同步改这里）。 */
+/** Retired client service names and their current replacements; update with host API changes. */
 export const RETIRED_SEAMS = {
   settingsScope: 'configForms.get(namespace)（同步 settingsSchema）',
   'settings.plugin.item': 'plugins.item / plugins.bundle.config / plugins.row.config',
 }
 
-/** 扫描目标：client half 源码与生成产物。 */
+/** Scan client sources and their generated bundle. */
 function scanTargets(root) {
-  const dir = join(root, 'lib', 'client')
-  const files = readdirSync(dir).filter((name) => name.endsWith('.mjs')).map((name) => join(dir, name))
+  const dir = join(root, 'src', 'client')
+  const files = readdirSync(dir).filter((name) => name.endsWith('.ts')).map((name) => join(dir, name))
   files.push(join(root, 'lib', 'client.js'))
   return files
 }
 
-/** 校验 client half 缝名。返回 { ok, errors }。 */
+/** Validate client service references and return { ok, errors }. */
 export function check(root = ROOT) {
   const errors = []
   let targets
@@ -49,7 +47,7 @@ export function check(root = ROOT) {
   return { ok: errors.length === 0, errors }
 }
 
-// CLI 入口（被 import 时不执行）。
+// CLI entry point; imports do not execute it.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { ok, errors } = check()
   for (const e of errors) console.error(`[verify-client-seams] ${e}`)

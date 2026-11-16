@@ -1,5 +1,4 @@
-// 门禁自证：verify-doc-budget 必须证明它会拒绝（法则 2）。
-// 归属：门禁源码改动跑本文件（node --test scripts/gates/）。
+// Documentation-budget gate regressions prove oversized files are rejected.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -28,7 +27,7 @@ test('拒绝：单个文件超限（含文件路径与超出量）', () => {
   const limit = BUDGETS['AGENTS.md']
   const files = {}
   for (const rel of Object.keys(BUDGETS)) files[rel] = 'x'.repeat(100)
-  files['AGENTS.md'] = 'y'.repeat(limit + 10) // 超 10 字符
+  files['AGENTS.md'] = 'y'.repeat(limit + 10) // Exceed the limit by ten characters.
   const { ok, errors } = check(makeTree(files))
   assert.equal(ok, false)
   assert.match(errors.join('\n'), /AGENTS\.md/)

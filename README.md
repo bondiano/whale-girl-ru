@@ -24,9 +24,9 @@
 Официальный **bundle-плагин** (`dsh.bundle` + `dsh.client` в корневом `package.json`), ставится через официальный профиль:
 
 ```sh
-# из локального каталога (режим разработки)
+# From a local directory (development)
 dsh plugin --profile web add <путь-к-каталогу-whale-girl-ru>
-# или с GitHub-форка, следя за веткой main
+# From the GitHub fork, tracking main
 dsh plugin --profile web add "github:bondiano/whale-girl-ru#main"
 ```
 
@@ -54,49 +54,42 @@ dsh plugin --profile web add "github:bondiano/whale-girl-ru#main"
 
 ## Разговор с питомцем
 
-В меню питомца есть **💬 Поговорить** — открывается беседа: пишите реплику (Enter — отправить), питомец отвечает текстом (печатающейся строкой) и, если включён голос, вслух. Ответы генерирует **модель DSH**; модель можно выбрать в настройках — селект **«Модель беседы»** перечисляет провайдеров и модели хоста (пусто — модель хоста по умолчанию). Характер — встроенный (Кит-девочка: по-русски, живо и тепло, 2–4 фразы, один уместный эмодзи) или свой системный промпт.
+В меню питомца есть **💬 Поговорить** и **⚙️ Настройки** (страница плагина с параметрами голоса и беседы). **🐳 Как дела?** спрашивает о выбранной сессии. **💬 Поговорить** — открывается беседа: пишите реплику (Enter — отправить), питомец отвечает текстом (печатающейся строкой) и, если включён голос, вслух. Ответы генерирует **модель DSH**; модель можно выбрать в настройках — селект **«Модель беседы»** перечисляет провайдеров и модели хоста (пусто — модель хоста по умолчанию). Характер — встроенный (Кит-девочка: по-русски, живо и тепло, 2–4 фразы, 1–2 уместных эмодзи) или свой системный промпт.
 
-Питомец знает про **активную сессию**: сколько идёт ход, какие инструменты вызывались, примерный остаток по медиане прошлых ходов (`chat.sessionContext`, по умолчанию включено). На «как дела?» или «когда закончится?» он отвечает по этим фактам и не выдумывает то, чего в них нет.
+Кнопка **«Как дела?»** в меню спрашивает о выбранной в DSH сессии. При `chat.sessionContext=true` питомец получает её активность и до шести последних видимых сообщений пользователя и ассистента, по 400 символов. Вывод инструментов, скрытые рассуждения и системные промпты не передаются. Если выбранная сессия недоступна, питомец об этом сообщает.
+
+После отправки строка ввода скрывается; **💬 Поговорить** открывает её снова. Озвучка начинается одновременно с появлением текста. Ответы остаются на 30–120 секунд после анимации текста, обычные реплики — на 15 секунд. **🐳 Как дела?**, **🍗 Покормить** и **🎾 Поиграть** находятся в одной группе меню; карточка уровня при открытом меню скрыта. Кормление и игра сопровождаются рабочими репликами и короткими советами по программированию и AI.
 
 На просьбу **рассказать новости** (кнопка `📰 Новости` в меню или вопрос «что нового?») питомец загружает свежие заголовки из RSS/Atom (`news.feeds`), пересказывает 2–3 своими словами со ссылками и честно говорит, если ленты недоступны.
 
 - Без `llm`-сервиса/модели беседа не ломается: приходит резервная фраза, питомец продолжает работать.
-- История — последние `chat.historyTurns` реплик в памяти процесса (в файл не пишется), при перезапуске начинается заново; при смене модели история сбрасывается.
+- История — последние `chat.historyTurns` реплик в памяти процесса (в файл не пишется), изолирована по модели и сессии, при перезапуске начинается заново.
 - Запрос идёт в выбранного провайдера модели: это обычный вызов модели, как у сессий DSH (токены расходуются по вашему тарифу).
-- В контекст уходят только стаж питомца, факты активной сессии и (по запросу) заголовки новостей.
+- В контекст уходят стаж питомца, данные выбранной сессии и (по запросу) заголовки новостей. Контекст сессии отключается в настройках.
 
 ## Голос
 
-Включите **Голос** в настройках плагина — питомец озвучивает ответы в беседе, реплики на кормление/игру и события (приветствие, победа, испуг, новый уровень).
+Голос включается отдельно в настройках. **Подписка ChatGPT не даёт поддерживаемого доступа к STT/TTS**: [ограничения Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) исключают аудио и transcription API. Режим `subscription` показывает явную ошибку и не делает сетевых запросов.
 
-- `voice.provider = browser` (по умолчанию) — системный голос (SpeechSynthesis): русский голос выбирается автоматически, сеть и ключи не нужны, скорость — `voice.rate`.
-- `voice.provider = openai` — модель TTS через OpenAI-совместимый **POST `{voice.baseUrl}/audio/speech`**; подходит и облачный API, и локальные сервера (Kokoro-FastAPI, Fish Speech, xTTS-обёртки). Поля: `baseUrl`, `model`, `voice`, `format` (mp3/wav/…); ключ — из переменной окружения `voice.apiKeyEnv` (по умолчанию `WHALE_GIRL_TTS_API_KEY`) или явно `voice.apiKey`; без ключа запрос идёт без `Authorization` (локальные сервера).
-- Если модель не ответила, питомец озвучивает фразу системным голосом — не замолкает.
-- Текст озвучки обрезается до 300 символов, аудиоответ — до 8 МБ, таймаут запроса — 20 с.
-- `voice.autoSpeakChat` (по умолчанию включено) — озвучивать ответы беседы автоматически; иначе только реплики событий.
-- **🎙 Микрофон** в беседе: нажмите и говорите (повторное нажатие — стоп, максимум 30 с). Запись уходит на `POST {voice.baseUrl}/audio/transcriptions` (модель `voice.sttModel`, по умолчанию `whisper-1`), распознанный текст подставляется в поле и отправляется. Без доступа к микрофону/MediaRecorder используется `SpeechRecognition` браузера (`ru-RU`); если нет и его — подсказка в беседе.
-- **🔁 Режим разговора**: после ответа питомца микрофон включается снова — получается голосовой диалог, как с Grok-ботом. Останавливается кнопкой 🔁, крестиком, Esc или закрытием беседы; пока говорит голос, питомец слегка покачивается (`pet-speaking`).
-
-Пример локального TTS:
-
-```sh
-export WHALE_GIRL_TTS_API_KEY=   # локальному серверу ключ не нужен
-# настройки: voice.enabled=true, voice.provider=openai,
-#            voice.baseUrl=http://localhost:8880/v1, voice.model=kokoro, voice.voice=af_heart
-```
+- `browser` — системный SpeechSynthesis и распознавание SpeechRecognition (`ru-RU`), без API-ключа. Русский голос зависит от браузера и ОС.
+- `openai` — **OpenAI API с отдельной оплатой**, который выбирается явно. По умолчанию распознавание использует `gpt-transcribe`, озвучка — `gpt-realtime-2.1-mini`, голос `marin`. Ключ задаётся через `WHALE_GIRL_TTS_API_KEY` или `voice.apiKey`; браузер его не получает.
+- Для явно выбранной совместимой модели (например, локального Kokoro) сохраняется `{voice.baseUrl}/audio/speech`. Realtime-модели используют WebSocket, а не этот endpoint.
+- **Микрофон**: нажатие начинает запись, повторное — завершает; предел 30 с. Отказ разрешения и ошибки провайдера показываются в беседе. Автоматической подмены провайдера нет.
+- **Режим разговора** повторяет прослушивание после ответа; остановка кнопкой, Esc или закрытием чата. `voice.autoSpeakChat` управляет озвучкой ответов.
+- Текст ограничен 300 символами, аудио — 8 МБ, запрос — 20 с. Поддержка микрофона требует разрешения браузера и защищённого контекста (HTTPS или localhost).
 
 ## Настольный компаньон (опционально)
 
 `desktop/` — **самостоятельное приложение-компаньон** (движок Node + оболочка Tauri, без runtime-зависимостей), которое держит кита на рабочем столе ОС. **Ставится не через `dsh plugin`** — запускается вручную:
 
 ```sh
-# Требования: Node ≥18; для оболочки рендера нужен Rust (cargo)
-npm install -g whale-girl-desktop   # npm install (движок + исходники оболочки Tauri)
-whale-girl-desktop --headless       # headless: heartbeat присутствия + опрос состояния + SSE
-cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # первая сборка ~5–15 мин; артефакт target/release/whale-girl-desktop (~12 МБ)
-./target/release/whale-girl-desktop   # прозрачный питомец поверх всех окон (по умолчанию локальный DSH на 3080)
-# WHALE_GIRL_BASE_URL=http://IP:PORT указывает на внешний DSH
-# или из исходников: cd desktop && npm install && cd src-tauri && cargo build --release
+# Requires Node >=18 and Rust (cargo) for the desktop shell
+npm install -g whale-girl-desktop   # Install the engine and Tauri shell sources
+whale-girl-desktop --headless       # Headless: presence heartbeat, state polling and SSE
+cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # First build: 5-15 min; target/release/whale-girl-desktop (~12 MB)
+./target/release/whale-girl-desktop   # Transparent, always-on-top pet; local DSH port 3080
+# WHALE_GIRL_BASE_URL=http://IP:PORT selects a remote DSH
+# From source: cd desktop && npm install && cd src-tauri && cargo build --release
 ```
 
 - Использует публичные эндпоинты whale-girl (`/state`, `/events`, `/presence`, `/interact`, `/config`, `/assets`) **не трогая плагин**; питомец на странице скрывается, пока компаньон работает (контракт присутствия), и возвращается после выхода/падения (TTL 45 с).
@@ -133,15 +126,15 @@ cd "$(npm root -g)/whale-girl-desktop/src-tauri" && cargo build --release  # п�
 
 ```yaml
 whale-girl:
-  enabled: true      # рендер в web (false отключает питомца на странице, пока работает настольный компаньон)
-  sessionMemory: false # память сессий (локальный файл; см. карточку настроек)
-  size: 110          # размер питомца, px (64–160)
-  opacity: 1         # обычная прозрачность (0.2–1)
+  enabled: true      # Browser pet; false when using the desktop companion
+  sessionMemory: false # Local session memory; see settings
+  size: 110          # Pet size in px (64-160)
+  opacity: 1         # Opacity (0.2-1)
   walk:
-    enabled: true    # прогулки
+    enabled: true    # Enable wandering
   sleepAfterMs: 60000
   replies:
-    idle: ['«Привет, я тут!»']   # доп. фразы болтовни (по одной на строку)
+    idle: ['«Привет, я тут!»']   # Extra chatter phrases, one per line
   voice:
     enabled: true
     provider: openai            # browser | openai
@@ -149,32 +142,32 @@ whale-girl:
     model: kokoro
     voice: af_heart
     apiKeyEnv: WHALE_GIRL_TTS_API_KEY
-    sttModel: whisper-1         # модель распознавания речи (микрофон)
-    instructions: Говори как милая игривая девочка-кит  # только для gpt-4o*-tts
-    conversation: false         # разговорный режим по умолчанию выключен
-    autoSpeakChat: true         # озвучивать ответы беседы
+    sttModel: gpt-transcribe         # Microphone transcription model
+    instructions: Говори как милая игривая девочка-кит  # Speech style for Realtime and gpt-4o*-tts
+    conversation: false         # Conversation mode starts disabled
+    autoSpeakChat: true         # Speak chat replies
   chat:
     enabled: true
-    provider: ''                # пусто = модель хоста; пара provider/model = «Модель беседы»
+    provider: ''                # Empty = host model; provider/model selects the chat model
     model: ''
-    sessionContext: true        # факты активной сессии в контексте
-    systemPrompt: ''            # пусто = встроенный характер
+    sessionContext: true        # Include selected-session facts
+    systemPrompt: ''            # Empty = built-in persona
     maxTokens: 300
     historyTurns: 8
   news:
     enabled: true
     maxItems: 5
-    feeds:                      # RSS/Atom; по одному адресу на строку в карточке
+    feeds:                      # RSS/Atom URLs, one per line in settings
       - https://lenta.ru/rss/news
       - https://habr.com/ru/rss/news/?fl=ru
       - https://hnrss.org/frontpage
 ```
 
-Полный список опций и почему семантический слой (XP / звания) закрыт: `lib/src/config.mjs`. **Не настраивается** (изменение порогов XP / званий сломало бы бухгалтерию накопления).
+Полный список опций и почему семантический слой (XP / звания) закрыт: `src/core/config.ts`. **Не настраивается** (изменение порогов XP / званий сломало бы бухгалтерию накопления).
 
 ## Персонажи
 
-🎭 «Сменить» переключает персонажей (или задайте `whale-girl:character` в localStorage); кнопка **неактивна, если в manifest один персонаж** («Других персонажей нет»). У каждого персонажа есть **все 15 состояний** (полный контракт: [docs/sprites-spec.md](docs/sprites-spec.md)); новые персонажи: [docs/adding-a-character.md](docs/adding-a-character.md).
+Персонаж выбирается по manifest или предпочтению `whale-girl:character` в localStorage при загрузке страницы. У каждого персонажа есть **все 15 состояний** (полный контракт: [docs/sprites-spec.md](docs/sprites-spec.md)); новые персонажи: [docs/adding-a-character.md](docs/adding-a-character.md).
 
 ## Эталонная реализация
 
@@ -199,3 +192,16 @@ whale-girl — полный образец **формата bundle-плагин�
 ## Лицензия
 
 MIT License
+
+## Разработка
+
+Основной плагин написан на TypeScript: `src/` → `dist/`, клиентский DSH-bundle — `lib/client.js`. Требуется Node ≥24.
+
+```sh
+npm ci
+npm test
+npm run typecheck
+node scripts/gates/run.mjs
+```
+
+Установщики workstation собирают одинаковый плагин для macOS и WSL. Смена Node half требует перезапуска DSH; активные сессии перед этим нужно завершить. `desktop/` имеет самостоятельную сборку.

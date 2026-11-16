@@ -28,4 +28,4 @@ Status: implemented
 
 - manifest 变更（帧时序/角色 meta/新角色）在运行中 GUI 上刷新页面即生效，不再被 immutable 缓存滞留。
 - sheet 改图仍需改名/角色 id（契约不变）；manifest 文件名与路径不变。
-- 引用点：`lib/client/index.mjs`（`loadAssets` 的 manifest fetch）、`docs/adding-a-character.md`（改图约束补 manifest 例外）、构建产物 `lib/client.js` 同步重建。
+- 引用点：`src/client/index.ts`（`loadAssets` 的 manifest fetch）、`docs/adding-a-character.md`（改图约束补 manifest 例外）、构建产物 `lib/client.js` 同步重建。
