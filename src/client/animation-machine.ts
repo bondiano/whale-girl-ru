@@ -72,6 +72,7 @@ function burstDue(context: AnimationContext, name: string): boolean {
 
 interface AnimationRule {
   target: string
+  guard: string
   when: (context: AnimationContext) => boolean
 }
 
@@ -81,29 +82,30 @@ interface AnimationRule {
  * can share a state name but occupy different priority positions.
  */
 const ANIMATION_RULES: readonly AnimationRule[] = [
-  { target: 'drag', when: (context) => context.dragging },
+  { target: 'drag', guard: 'dragging', when: (context) => context.dragging },
   // Drag-release buffer: hold idle for 1.5 s, but let a requested wake animation through.
   {
     target: 'idle',
+    guard: 'dragReleaseHeld',
     when: (context) => context.dragReleaseUntil > context.now && context.transient !== 'wake',
   },
   // Host event bursts (welcome/celebrate/error/disappointed) outrank interactions.
-  { target: 'welcome', when: (context) => burstDue(context, 'welcome') },
-  { target: 'celebrate', when: (context) => burstDue(context, 'celebrate') },
-  { target: 'error', when: (context) => burstDue(context, 'error') },
-  { target: 'disappointed', when: (context) => burstDue(context, 'disappointed') },
-  { target: 'eat', when: (context) => context.transient === 'eat' },
-  { target: 'play', when: (context) => context.transient === 'play' },
-  { target: 'wake', when: (context) => context.transient === 'wake' },
-  { target: 'wait', when: (context) => context.sessionWait },
+  { target: 'welcome', guard: 'welcomeBurst', when: (context) => burstDue(context, 'welcome') },
+  { target: 'celebrate', guard: 'celebrateBurst', when: (context) => burstDue(context, 'celebrate') },
+  { target: 'error', guard: 'errorBurst', when: (context) => burstDue(context, 'error') },
+  { target: 'disappointed', guard: 'disappointedBurst', when: (context) => burstDue(context, 'disappointed') },
+  { target: 'eat', guard: 'transientEat', when: (context) => context.transient === 'eat' },
+  { target: 'play', guard: 'transientPlay', when: (context) => context.transient === 'play' },
+  { target: 'wake', guard: 'transientWake', when: (context) => context.transient === 'wake' },
+  { target: 'wait', guard: 'sessionWait', when: (context) => context.sessionWait },
   // Local turn-completion celebration stays below approval wait and above companionship.
-  { target: 'celebrate', when: (context) => context.celebrateUntil > context.now },
-  { target: 'working', when: (context) => context.workingActive },
-  { target: 'think', when: (context) => context.sessionThink },
-  { target: 'joy', when: (context) => context.now < context.joyUntil },
-  { target: 'sleep', when: (context) => context.sleeping },
-  { target: 'walk', when: (context) => context.walking },
-  { target: 'idle', when: () => true },
+  { target: 'celebrate', guard: 'celebrateUntil', when: (context) => context.celebrateUntil > context.now },
+  { target: 'working', guard: 'workingActive', when: (context) => context.workingActive },
+  { target: 'think', guard: 'sessionThink', when: (context) => context.sessionThink },
+  { target: 'joy', guard: 'joyUntil', when: (context) => context.now < context.joyUntil },
+  { target: 'sleep', guard: 'sleeping', when: (context) => context.sleeping },
+  { target: 'walk', guard: 'walking', when: (context) => context.walking },
+  { target: 'idle', guard: 'idleFallback', when: () => true },
 ]
 
 /** Priority order of the machine's `checking` guards, derived from the same rule list. */
@@ -120,6 +122,7 @@ export const animationMachine = setup({
   actions: {
     remember: assign(({ event }) => normalizeAnimationInput(event.input)),
   },
+  guards: Object.fromEntries(ANIMATION_RULES.map(rule => [rule.guard, ({ context }: { context: AnimationContext }) => rule.when(context)])),
 }).createMachine({
   id: 'animation',
   initial: 'checking',
@@ -131,10 +134,7 @@ export const animationMachine = setup({
     checking: {
       // Guards are generated from ANIMATION_RULES, which also derives ANIMATION_PRIORITY;
       // verify-spec-states compares the documented order with that same list.
-      always: ANIMATION_RULES.map(({ target, when }) => ({
-        guard: ({ context }) => when(context),
-        target,
-      })),
+      always: ANIMATION_RULES.map(({ target, guard }) => ({ guard, target })),
     },
     ...stableStates,
   },
