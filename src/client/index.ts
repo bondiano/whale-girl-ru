@@ -13,7 +13,10 @@ import type { PetState } from '../core/pet-state.js'
 // and timing. TRANSIENT_MS resets eat/play even without sheets. Pointer capture starts only after
 // the drag threshold, preserving ordinary menu-button clicks.
 
-import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, chatBubbleDuration, pickState, nextWorkingRhythm, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, shouldDimForDialogs, voiceErrorMessage } from './logic.js'
+import { createActor } from 'xstate'
+import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, chatBubbleDuration, bubbleWaitsForSpeech, celebratePhraseDue, nextWorkingRhythm, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, shouldDimForDialogs, voiceErrorMessage } from './logic.js'
+import { animationMachine, animationStateOf } from './animation-machine.js'
+import { conversationMachine, conversationFlags, canAutoListen } from './conversation-machine.js'
 import { parseCharacters, getCharacter, stateOf } from './character.js'
 // Route endpoints have one source (src/core/routes.ts), enforced by verify-routes-sync; esbuild
 // inlines them into the bundle.
@@ -27,8 +30,8 @@ import { planOverlay } from './overlay-placement.js'
 import { bindMenuKeyboard, currentSessionId, SESSION_STATUS_QUESTION } from './menu.js'
 import { presentChatReply, replyWaitingPhase } from './chat-reply.js'
 import { playPcmResponse } from './pcm-playback.js'
-import { normalizeVoiceText } from '../core/voice.js'
-import { speechTone } from '../core/speech-text.js'
+import { VOICE_TEXT_MAX } from '../core/voice.js'
+import { shouldSpeakReply, speechTone, splitSpeechChunks } from '../core/speech-text.js'
 import type { SpeechTone } from '../core/speech-text.js'
 
 const ASSETS_URL = ASSETS_PATH
@@ -40,7 +43,7 @@ interface ClientConfig extends importSettingsValues {
  enabled: boolean; sessionMemory: boolean; size: number; opacity: number;
  walk: { enabled: boolean; minWaitMs: number; maxWaitMs: number; minMs: number; maxMs: number; speedPxPerSec: number };
  sleepAfterMs: number; pollMs: number; bubbleMs: number;
- voice: { enabled: boolean; provider: string; rate: number; conversation: boolean; autoSpeakChat: boolean; voice?: string; baseUrl?: string };
+ voice: { enabled: boolean; provider: string; rate: number; conversation: boolean; autoSpeakChat: boolean; minSpeakChars: number; voice?: string; baseUrl?: string };
  chat: { enabled: boolean; sessionContext: boolean; provider?: string; model?: string }; replies?: Record<string, string[]>;
 }
 interface Bubble { el: HTMLDivElement; scroll: HTMLDivElement; textEl: HTMLSpanElement; tail: HTMLDivElement; timer: ReturnType<typeof setTimeout> | null }
@@ -51,7 +54,7 @@ const CFG_DEFAULTS: ClientConfig = {
   sleepAfterMs: 60000, pollMs: 3000, bubbleMs: 15000,
   // Mirrors DEFAULTS (verify-config-sync): the client needs defaults before its first /config
   // response.
-  voice: { enabled: false, provider: 'browser', rate: 1, conversation: false, autoSpeakChat: true },
+  voice: { enabled: false, provider: 'browser', rate: 1, conversation: false, autoSpeakChat: false, minSpeakChars: 200 },
   chat: { enabled: true, sessionContext: true },
 }
 // Settings namespace equals the card key and Node settings.register namespace; otherwise the card
@@ -515,13 +518,16 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   let facingAt = 0
   let lastFrameAt = 0
   // Random working interludes (v3): usually think, occasionally working. nextWorkingRhythm decides
-  // timing; this host executes scheduled flips. workingActive feeds pickState, and workingTimer
+  // timing; this host executes scheduled flips. workingActive feeds the animation machine, and workingTimer
   // schedules the transition.
   let working = { active: false, until: 0 }
   let workingTimer: ReturnType<typeof setTimeout> | null = null
   // Client turn-completion window: play celebrate for ROUND_CELEBRATE_MS after session completion
   // changes.
   let celebrateUntil = 0
+  // The animation machine is the single authority for the visible state; tick() only feeds it the
+  // host's local signals and renders the projected state.
+  const animationActor = createActor(animationMachine).start()
   // Walking: periodic strolls along the viewport bottom.
   let walking = false
   let walkDir = 1
@@ -530,27 +536,66 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   let walkRaf: number | null = null
   // Session-awareness signals (P2 thinking state) derived from the host sessions snapshot.
   let sessionMood = { thinking: false, waiting: false, titles: [] }
-  // Chat/voice/chatter: the input is a separate fixed layer and replies are bubbles in effects.
-  // Chat uses Node /chat; voice uses model /voice or SpeechSynthesis/SpeechRecognition.
+  // Chat/voice lifecycle is owned by the xstate conversation machine. The booleans below are
+  // read-only projections kept for the DOM layer; every transition goes through actor.send().
   let chatEl: HTMLFormElement | null = null
   let chatInput: HTMLInputElement | null = null
+  const conversation = createActor(conversationMachine, {
+    input: {
+      conversationMode: cfg.voice?.conversation === true,
+      voiceEnabled: cfg.voice?.enabled === true,
+      userTyping: false,
+    },
+  }).start()
   let chatOpen = false
-  let chatGeneration = 0
   let chatPending = false
   let textPending = false
+  let listening = false
+  let recording = false
+  let transcribing = false
+  let autoListening = false
+  let speechPending = false
+  let conversationMode = cfg.voice?.conversation === true
+  const syncConversationFlags = () => {
+    const next = conversationFlags(conversation.getSnapshot())
+    chatOpen = next.chatOpen
+    chatPending = next.chatPending
+    textPending = next.textPending
+    speechPending = next.speechPending
+    listening = next.listening
+    recording = next.recording
+    transcribing = next.transcribing
+    autoListening = next.autoListening
+  }
+  conversation.subscribe(syncConversationFlags)
+  syncConversationFlags()
+  const syncTyping = () => conversation.send({ type: 'TYPING', userTyping: userTyping() })
+  let chatGeneration = 0
   const composerVisible = () => chatOpen && chatEl !== null && chatEl.style.display !== 'none'
   let chatMic: HTMLButtonElement | null = null
-  let listening = false
-  let conversationMode = false
-  let recording = false
   let recognition: SpeechRecognitionLike | null = null
   let revealToken = 0
   let currentAudio: HTMLAudioElement | null = null
-  let speechPending = false
   let chatterAt = 0
   let lastChatterPhrase: string | null = null
+  let lastCelebratePhraseAt = 0
   let lastActivityName: string | null = null
   let lastLevel = 0
+
+  // Conversation mode must never capture what the user is typing. Focused text controls count even
+  // when they belong to the host chat, and a non-empty pet draft means the user chose text input.
+  const deepActiveElement = (): Element | null => {
+    let element: Element | null = document.activeElement
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement
+    return element
+  }
+  const textEntryFocused = () => {
+    const element = deepActiveElement()
+    return element instanceof HTMLElement
+      && (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.isContentEditable)
+  }
+  const chatDraftPresent = () => chatInput !== null && chatInput.value.trim() !== ''
+  const userTyping = () => textEntryFocused() || chatDraftPresent()
 
   // Rendering.
   const renderStatus = () => {
@@ -833,7 +878,20 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       resetTransient(now)
     }
     const petThinking = replyWaitingPhase(textPending, speechPending, stage.classList.contains('pet-speaking')) !== null
-    const target = pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking || petThinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil })
+    const derive = () => {
+      animationActor.send({
+        type: 'UPDATE',
+        input: {
+          activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now,
+          sessionThink: sessionMood.thinking || petThinking,
+          sessionWait: sessionMood.waiting,
+          workingActive: working.active,
+          celebrateUntil,
+        },
+      })
+      return animationStateOf(animationActor.getSnapshot())
+    }
+    let target = derive()
     // Visual waking edge: show wake when the previous frame displayed sleep and the next leaves it,
     // unless dragging or another transient intervenes. Derived sleeping cannot trigger this:
     // sessions prioritize think/working while activity stays idle and sleeping stays true, so that
@@ -841,9 +899,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     if (shouldWake(animState, target, { dragging, transient })) {
       transient = 'wake'
       transientUntil = now + WAKE_MS
-      // Recompute after transient changes; wake outranks think/working/sleep/walk in STATE_TABLE.
-      setState(pickState({ activity, dragging, walking, transient, sleeping, joyUntil, dragReleaseUntil, now, sessionThink: sessionMood.thinking || petThinking, sessionWait: sessionMood.waiting, workingActive: working.active, celebrateUntil }))
-      return
+      // Recompute after transient changes; wake outranks think/working/sleep/walk in the machine.
+      target = derive()
     }
     setState(target)
     const anim = stateOf(character, animState)
@@ -986,6 +1043,8 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   // bubble exists at a time; each new reply replaces the previous one.
   const bubbleTimers = new Set<ReturnType<typeof setTimeout>>()
   let activeBubble: HTMLDivElement | null = null
+  // Chat reply whose audio is still playing: its bubble timer waits, then restarts after speech.
+  let speakingBubble: { bubble: Bubble; ms: number } | null = null
   let waitingAnimation: Animation | null = null
   const BUBBLE_TAIL_SIZE = 8
   const BUBBLE_MAX_WIDTH = 'min(280px, calc(100vw - 16px))'
@@ -994,6 +1053,7 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   const clearBubble = () => {
     waitingAnimation?.cancel()
     waitingAnimation = null
+    speakingBubble = null
     if (activeBubble !== null) {
       activeBubble.remove()
       activeBubble = null
@@ -1111,6 +1171,12 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     bubble.timer = setTimeout(() => {
       if (bubble.timer !== null) bubbleTimers.delete(bubble.timer)
       bubble.timer = null
+      // The reply is still being read aloud: keep it on screen and check again later.
+      if (bubbleWaitsForSpeech({ speechPending, isSpeakingBubble: speakingBubble?.bubble === bubble, isActive: activeBubble === bubble.el })) {
+        armBubble(bubble, ms)
+        return
+      }
+      if (speakingBubble?.bubble === bubble) speakingBubble = null
       if (activeBubble === bubble.el) activeBubble = null
       bubble.el.remove()
       if (typeof onBubbleShown === 'function') onBubbleShown() // The bubble disappeared; restore the status card.
@@ -1187,8 +1253,18 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       if (event.key === 'Enter') { event.preventDefault(); void sendChat() }
       if (event.key === 'Escape') closeChat()
     })
-    // Input focus signals user presence: stop movement during conversation.
-    input.addEventListener('focus', () => stopWalk())
+    // Input focus signals user presence: stop movement during conversation. An automatic
+    // conversation listen that started earlier must yield immediately to the keyboard.
+    input.addEventListener('focus', () => {
+      stopWalk()
+      syncTyping()
+      if (autoListening) cancelMicrophone()
+    })
+    input.addEventListener('input', () => {
+      syncTyping()
+      if (input.value.trim() !== '') cancelMicrophone()
+    })
+    input.addEventListener('blur', () => { syncTyping() })
     // Input-row clicks must not reach document handlers that close the menu/chat.
     panel.addEventListener('pointerdown', (event) => event.stopPropagation())
     document.body.appendChild(panel)
@@ -1253,63 +1329,85 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       try { recognition.stop() } catch { /* Already stopped. */ }
       recognition = null
     }
-    if (listening) { listening = false; updateMic() }
+    conversation.send({ type: 'LISTEN_END' })
+    updateMic()
   }
   const updateMic = () => {
     if (chatMic === null) return
-    const active = recording || listening
+    const active = recording || listening || transcribing
     chatMic.textContent = active ? '⏹' : '🎙'
     chatMic.style.background = active ? 'rgba(240,90,90,.75)' : 'rgba(255,255,255,.10)'
     chatMic.setAttribute('aria-pressed', active ? 'true' : 'false')
     chatMic.title = active ? 'Остановить запись' : 'Сказать голосом'
     chatMic.setAttribute('aria-label', chatMic.title)
   }
-  const listenOnce = () => {
+  const listenOnce = (auto = false) => {
     if (!chatEnabled()) return
     if (!chatOpen) openChat() // Voice must work without first opening the input row.
     if (chatInput === null) return
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
     if (typeof Recognition !== 'function') {
-      showReply('Браузер не умеет распознавать речь. Напиши текстом — я тут.')
+      if (!auto) showReply('Браузер не умеет распознавать речь. Напиши текстом — я тут.')
       return
     }
     stopListening()
+    syncTyping()
+    if (auto && !canAutoListen(conversation.getSnapshot())) return
     try {
       const instance = new Recognition()
       recognition = instance
       instance.lang = 'ru-RU'
       instance.interimResults = false
       instance.maxAlternatives = 1
-      instance.onstart = () => { if (recognition === instance) { listening = true; updateMic() } }
+      instance.onstart = () => { if (recognition === instance) updateMic() }
       instance.onresult = (event) => {
         const transcript = event?.results?.[0]?.[0]?.transcript
         if (recognition !== instance || !chatOpen) return
+        // A hands-free listen can race with the first keystroke. Drop the transcript instead of
+        // sending it as if the user had said a random phrase.
+        if (autoListening && userTyping()) {
+          conversation.send({ type: 'LISTEN_END' })
+          return
+        }
         if (typeof transcript === 'string' && transcript.trim() !== '' && chatInput !== null) {
           chatInput.value = transcript.trim()
+          conversation.send({ type: 'LISTEN_END' })
           void sendChat()
         }
       }
       instance.onerror = (event) => {
         if (recognition !== instance || !chatOpen) return
+        // Automatic conversation retries must stay silent: a no-speech/timeout error in hands-free
+        // mode is normal and used to surface as a stray "Не разобрала слова" bubble.
+        const wasAuto = autoListening
+        conversation.send({ type: 'LISTEN_END' })
+        if (wasAuto) return
         // Translate not-allowed/no-speech/network/audio-capture/service-not-allowed into actionable
-        // messages.
+        // messages for a deliberate microphone click.
         showReply(voiceErrorMessage(typeof event?.error === 'string' ? event.error : ''))
       }
       instance.onend = () => {
         if (recognition !== instance) return
         recognition = null
-        if (listening) { listening = false; updateMic() }
+        conversation.send({ type: 'LISTEN_END' })
+        updateMic()
       }
+      conversation.send(auto
+        ? { type: 'LISTEN_AUTO', mode: 'browser' }
+        : { type: 'LISTEN_MANUAL', mode: 'browser' })
       instance.start()
     } catch {
-      listening = false
+      conversation.send({ type: 'LISTEN_END' })
       updateMic()
-      showReply('Не получилось включить микрофон. Напиши текстом — я тут.')
+      if (!auto) showReply('Не получилось включить микрофон. Напиши текстом — я тут.')
     }
   }
   let transcriptionGeneration = 0
   const uploadAudio = async (blob: Blob, mime: string) => {
     const generation = transcriptionGeneration
+    const wasAuto = autoListening
+    conversation.send({ type: 'TRANSCRIBE_START' })
+    updateMic()
     try {
       const res = await fetch(TRANSCRIBE_PATH, {
         method: 'POST',
@@ -1319,27 +1417,49 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       const body = await res.json().catch(() => null)
       if (!chatOpen || generation !== transcriptionGeneration) return
       if (!res.ok) {
-        showReply(voiceErrorMessage(body?.error))
+        if (!wasAuto) showReply(voiceErrorMessage(body?.error))
         return
       }
       const text = typeof body?.text === 'string' ? body.text.trim() : ''
       if (text === '') {
-        showReply('Не разобрала слова. Попробуй ещё раз или напиши текстом.')
+        // No-speech is normal in hands-free mode; showing a bubble there looked like the pet
+        // started talking on its own.
+        if (!wasAuto) showReply('Не разобрала слова. Попробуй ещё раз или напиши текстом.')
         return
       }
+      // Never submit a hands-free recording after the user moved to the keyboard.
+      if (wasAuto && userTyping()) return
       if (chatInput !== null) chatInput.value = text
       await sendChat()
     } catch {
-      if (chatOpen && generation === transcriptionGeneration) showReply(voiceErrorMessage(null))
+      if (!wasAuto && chatOpen && generation === transcriptionGeneration) showReply(voiceErrorMessage(null))
+    } finally {
+      conversation.send({ type: 'TRANSCRIBE_END' })
+      updateMic()
     }
   }
   const microphone = createMicrophoneCapture({
     allowed: () => chatOpen && cfg.voice.enabled === true && cfg.voice.provider !== 'browser',
     acquire: () => navigator.mediaDevices.getUserMedia({ audio: true }),
     create: (stream) => new MediaRecorder(stream),
-    recording: (active) => { recording = active; updateMic() },
+    recording: (active) => {
+      // MediaRecorder reports recording=false before it hands over the blob, and the upload needs
+      // the original autoListening flag. Defer the idle transition by a tick: a real upload claims
+      // the transcribing phase first, while an empty recording falls back to idle.
+      if (!active) {
+        setTimeout(() => {
+          const flags = conversationFlags(conversation.getSnapshot())
+          if (flags.listening || flags.recording) conversation.send({ type: 'LISTEN_END' })
+        }, 0)
+      }
+      updateMic()
+    },
     audio: (blob, mime) => { void uploadAudio(blob, mime) },
-    error: (error) => showReply(voiceErrorMessage(error instanceof Error && error.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture')),
+    error: (error) => {
+      const wasAuto = autoListening
+      conversation.send({ type: 'LISTEN_END' })
+      if (!wasAuto) showReply(voiceErrorMessage(error instanceof Error && error.name === 'NotAllowedError' ? 'not-allowed' : 'audio-capture'))
+    },
   })
   const stopRecording = () => microphone.stop(true)
   const startRecording = () => microphone.start()
@@ -1347,46 +1467,75 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   // browser SpeechRecognition instead of receiving voice-disabled with no transcription.
   const serverStt = () => cfg.voice?.enabled === true
     && cfg.voice?.provider !== 'browser'
-  const toggleMic = async () => {
+  const toggleMic = async (auto = false) => {
+    syncTyping()
+    if (auto && !canAutoListen(conversation.getSnapshot())) return
+    if (transcribing) { cancelMicrophone(); return }
     if (recording) { stopRecording(); return }
     if (microphone.busy()) return
     if (listening) { stopListening(); return }
+    // Starting a capture while TTS is speaking would make the machine reject LISTEN_* and leave
+    // the recorder running behind a projection that never becomes listening.
+    if (speechPending) {
+      if (auto) return
+      stopSpeaking()
+    }
     if (cfg.voice.provider === 'subscription') {
-      showReply(voiceErrorMessage('voice-subscription-unsupported'))
+      if (!auto) showReply(voiceErrorMessage('voice-subscription-unsupported'))
       return
     }
     if (cfg.voice.provider !== 'browser' && cfg.voice.enabled !== true) {
-      showReply(voiceErrorMessage('voice-disabled'))
+      if (!auto) showReply(voiceErrorMessage('voice-disabled'))
       return
     }
     if (serverStt()) {
       if (!chatOpen) openChat()
       if (typeof window.MediaRecorder !== 'function' || navigator.mediaDevices?.getUserMedia === undefined) {
-        showReply('Запись недоступна. Открой DSH через localhost или HTTPS и разреши микрофон.')
+        if (!auto) showReply('Запись недоступна. Открой DSH через localhost или HTTPS и разреши микрофон.')
         return
       }
-      await startRecording()
+      conversation.send(auto
+        ? { type: 'LISTEN_AUTO', mode: 'server' }
+        : { type: 'LISTEN_MANUAL', mode: 'server' })
+      try {
+        await startRecording()
+      } catch {
+        conversation.send({ type: 'LISTEN_END' })
+      }
       return
     }
-    listenOnce()
+    listenOnce(auto)
   }
 
-  // Conversation mode: listen again after replying, when enabled in settings.
+  // Conversation mode: listen again only after a spoken reply, and only while no text control is
+  // focused and no pet draft exists. A silent short reply must never reopen the microphone.
   const conversationResume = createConversationResume(
-    () => chatOpen && conversationMode && cfg.voice.enabled === true && !recording && !listening,
-    () => { void toggleMic() },
+    () => chatOpen
+      && canAutoListen(conversation.getSnapshot())
+      && !recording
+      && !listening
+      && !transcribing
+      && !userTyping(),
+    () => { void toggleMic(true) },
   )
-  const maybeConversationListen = () => conversationResume.schedule()
-  const cancelMicrophone = () => { transcriptionGeneration += 1; conversationResume.cancel(); microphone.cancel(); stopListening() }
-
+  const maybeConversationListen = () => {
+    syncTyping()
+    conversationResume.schedule()
+  }
+  const cancelMicrophone = () => {
+    transcriptionGeneration += 1
+    conversationResume.cancel()
+    microphone.cancel()
+    conversation.send({ type: 'CANCEL' })
+    stopListening()
+  }
   const setSpeaking = (on: boolean) => {
     try { stage.classList.toggle('pet-speaking', on) } catch { /* The stage may have been removed. */ }
     updateWaitingFeedback()
   }
 
   const closeChat = () => {
-    chatOpen = false
-    textPending = false
+    conversation.send({ type: 'CLOSE' })
     chatGeneration += 1
     cancelMicrophone()
     revealToken += 1 // Interrupt unfinished text reveal.
@@ -1414,7 +1563,9 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     if (!chatEnabled()) return
     const panel = ensureChat()
     panel.style.display = 'flex'
-    chatOpen = true
+    // A reply bubble can leave the chat open with its composer dismissed; reopening the pet
+    // returns to composing instead of pretending the chat was closed.
+    conversation.send(chatOpen ? { type: 'COMPOSE' } : { type: 'OPEN' })
     toggleMenu(false)
     releaseInteraction()
     stopWalk() // Stop movement before measuring the pet's position.
@@ -1446,12 +1597,12 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     if (chatInput === null || chatPending) return
     const text = chatInput.value.replace(/\s+/g, ' ').trim()
     if (text === '') return
-    chatPending = true
-    textPending = true
+    conversation.send({ type: 'SEND' })
     const generation = chatGeneration
     chatInput.value = ''
     stopSpeaking()
     dismissChatInput()
+    syncTyping()
     let typing = showTypingBubble()
     try {
       const res = await fetch(CHAT_PATH, {
@@ -1461,9 +1612,9 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       })
       const body = await res.json().catch(() => null)
       if (generation !== chatGeneration || !chatOpen) return
-      textPending = false
-      updateWaitingFeedback()
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
+      conversation.send({ type: 'REPLY' })
+      updateWaitingFeedback()
       const reply = typeof body?.reply === 'string' && body.reply !== '' ? body.reply : '…'
       const bubbleText = typeof body?.bubble === 'string' && body.bubble !== '' ? body.bubble : reply
       const speech = typeof body?.speech === 'string' && body.speech !== '' ? body.speech : reply
@@ -1478,18 +1629,20 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       await presentChatReply({
         current: () => generation === chatGeneration && chatOpen && activeBubble === typing.el,
         speak: () => {
-          if (chatOpen && cfg.voice?.autoSpeakChat !== false) spoken = speak(speech)
+          if (chatOpen && shouldSpeakReply(speech, cfg.voice)) spoken = speak(speech)
           placeBubble(typing)
         },
         reveal: () => revealText(typing, reply),
         finish: () => {
-          armBubble(typing, chatBubbleMs(bubbleText))
-          if (!spoken) maybeConversationListen()
+          const readMs = chatBubbleMs(bubbleText)
+          if (spoken) speakingBubble = { bubble: typing, ms: readMs }
+          armBubble(typing, readMs)
+          conversation.send({ type: 'REVEALED' })
         },
       })
     } catch {
       if (generation !== chatGeneration || !chatOpen) return
-      textPending = false
+      conversation.send({ type: 'FAIL' })
       updateWaitingFeedback()
       const message = 'Хм… не получилось поговорить. Попробуй ещё раз!'
       typing = ensureLiveBubble(typing)
@@ -1498,8 +1651,6 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       placeBubble(typing)
       armBubble(typing, chatBubbleMs(message))
     } finally {
-      chatPending = false
-      textPending = false
       updateWaitingFeedback()
       finishChatWhenIdle()
       if (chatInput !== null && composerVisible() && generation === chatGeneration) {
@@ -1524,8 +1675,12 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
   // explicitly rather than silently substituting a provider.
   const speechRequest = createSpeechRequest()
   let releaseAudio: (() => void) | null = null
+  // Increments on every new utterance and every stop; stale chunk callbacks compare it before
+  // touching shared speech state.
+  let speechSession = 0
   const stopSpeaking = () => {
-    speechPending = false
+    speechSession += 1
+    conversation.send({ type: 'SPEAK_END' })
     speechRequest.cancel()
     try { window.speechSynthesis?.cancel() } catch { /* Without the API there is nothing to cancel. */ }
     if (currentAudio !== null) {
@@ -1551,12 +1706,27 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     return voices.find((voice) => typeof voice.lang === 'string' && voice.lang.toLowerCase().startsWith('ru')) ?? null
   }
 
-  const speakBrowser = (text: string, tone: SpeechTone): boolean => {
+  // Finish the whole reply, not one chunk: pending stays set until the last chunk ends, so the
+  // bubble and conversation mode wait for full playback.
+  const finishSpeechSession = (session: number, resumeListening: boolean) => {
+    if (session !== speechSession) return
+    conversation.send({ type: 'SPEAK_END' })
+    setSpeaking(false)
+    // Speech took the time it took: give the bubble its full read duration afterwards instead of
+    // letting a timer that expired mid-playback remove the reply.
+    const held = speakingBubble
+    speakingBubble = null
+    if (held !== null && activeBubble === held.bubble.el) armBubble(held.bubble, held.ms)
+    if (resumeListening) maybeConversationListen()
+    finishChatWhenIdle()
+  }
+
+  const speakBrowserChunk = (text: string, tone: SpeechTone, signal: AbortSignal) => new Promise<boolean>((resolve) => {
     const synth = window.speechSynthesis
-    if (synth === undefined || typeof SpeechSynthesisUtterance !== 'function') { speechPending = false; setSpeaking(false); finishChatWhenIdle(); return false }
+    if (synth === undefined || typeof SpeechSynthesisUtterance !== 'function') { resolve(false); return }
+    let settled = false
+    const done = (ok: boolean) => { if (settled) return; settled = true; resolve(ok) }
     try {
-      synth.cancel()
-      const signal = speechRequest.start()
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = 'ru-RU'
       utterance.pitch = tone === 'cheerful' ? 1.12 : tone === 'calm' ? .95 : 1
@@ -1564,71 +1734,139 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       const voice = pickBrowserVoice()
       if (voice !== null) utterance.voice = voice
       utterance.onstart = () => { if (speechRequest.current(signal)) setSpeaking(true) }
-      utterance.onend = () => { if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); maybeConversationListen(); finishChatWhenIdle() } }
-      utterance.onerror = () => { if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); finishChatWhenIdle() } }
+      utterance.onend = () => done(true)
+      utterance.onerror = () => done(false)
+      signal.addEventListener('abort', () => done(false), { once: true })
       synth.speak(utterance)
-      return true
-    } catch { speechPending = false; setSpeaking(false); finishChatWhenIdle(); return false }
-  }
+    } catch { done(false) }
+  })
 
-  const speakModel = async (text: string, tone: SpeechTone) => {
-    const signal = speechRequest.start()
+  const playAudioBlob = (blob: Blob, signal: AbortSignal) => new Promise<boolean>((resolve, reject) => {
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    currentAudio = audio
+    let settled = false
+    const cleanup = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; if (releaseAudio === cleanup) releaseAudio = null }
+    const done = (ok: boolean, error?: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (error !== undefined) reject(error)
+      else resolve(ok)
+    }
+    releaseAudio = cleanup
+    audio.addEventListener('ended', () => done(true), { once: true })
+    audio.addEventListener('error', () => done(false), { once: true })
+    audio.addEventListener('playing', () => { if (speechRequest.current(signal)) setSpeaking(true) }, { once: true })
+    signal.addEventListener('abort', () => { try { audio.pause() } catch { /* Already stopped. */ } done(false) }, { once: true })
+    audio.play().catch(() => done(false, new Error('playback blocked')))
+  })
+
+  type PreparedSpeech =
+    | { kind: 'pcm'; response: Response }
+    | { kind: 'blob'; blob: Blob }
+    | { kind: 'failed'; error: unknown }
+
+  // Fetch (and thus synthesize) one chunk. The first chunk streams PCM so audio can start before
+  // the whole synthesis finishes; look-ahead chunks are buffered whole so they are ready to play.
+  const prepareModelChunk = async (text: string, tone: SpeechTone, signal: AbortSignal, stream: boolean): Promise<PreparedSpeech> => {
     try {
       const res = await fetch(VOICE_PATH, {
         signal,
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: typeof AudioContext === 'function' ? 'audio/pcm' : 'audio/*' },
+        headers: { 'content-type': 'application/json', accept: stream && typeof AudioContext === 'function' ? 'audio/pcm' : 'audio/*' },
         body: JSON.stringify({ text, tone }),
       })
       if (!res.ok) {
         const failure = await res.json().catch(() => null)
         throw new Error(typeof failure?.error === 'string' ? failure.error : `HTTP ${res.status}`)
       }
-      if (res.headers.get('content-type')?.toLowerCase().startsWith('audio/pcm')) {
-        await playPcmResponse(res, { signal, onPlaying: () => { if (speechRequest.current(signal)) setSpeaking(true) } })
-        if (speechRequest.current(signal)) {
-          speechPending = false
-          setSpeaking(false)
-          maybeConversationListen()
-          finishChatWhenIdle()
-        }
-        return
-      }
+      if (res.headers.get('content-type')?.toLowerCase().startsWith('audio/pcm')) return { kind: 'pcm', response: res }
       const blob = await res.blob()
-      if (!speechRequest.current(signal) || cfg.voice.enabled !== true) return
       if (blob.size === 0) throw new Error('empty audio')
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      currentAudio = audio
-      const cleanup = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; if (releaseAudio === cleanup) releaseAudio = null }
-      releaseAudio = cleanup
-      audio.addEventListener('ended', () => { cleanup(); if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); maybeConversationListen(); finishChatWhenIdle() } }, { once: true })
-      audio.addEventListener('error', () => { cleanup(); if (speechRequest.current(signal)) { speechPending = false; setSpeaking(false); finishChatWhenIdle() } }, { once: true })
-      audio.addEventListener('playing', () => { if (speechRequest.current(signal)) setSpeaking(true) }, { once: true })
-      await audio.play().catch(() => { cleanup(); if (speechRequest.current(signal)) setSpeaking(false); throw new Error('playback blocked') })
+      return { kind: 'blob', blob }
     } catch (error) {
-      if (!speechRequest.current(signal)) return
-      speechPending = false
-      setSpeaking(false)
-      const code = error instanceof Error ? error.message : ''
-      showReply((code.startsWith('voice-') || code.startsWith('tts-')) ? voiceErrorMessage(code) : 'Не удалось озвучить ответ. Проверь настройки голоса и доступ к сервису.')
+      return { kind: 'failed', error }
     }
+  }
+
+  const playPreparedChunk = async (prepared: PreparedSpeech, signal: AbortSignal) => {
+    if (prepared.kind === 'failed') throw prepared.error
+    if (prepared.kind === 'pcm') {
+      await playPcmResponse(prepared.response, { signal, onPlaying: () => { if (speechRequest.current(signal)) setSpeaking(true) } })
+      return speechRequest.current(signal)
+    }
+    if (!speechRequest.current(signal) || cfg.voice.enabled !== true) return false
+    return playAudioBlob(prepared.blob, signal)
+  }
+
+  // Synthesis of chunk N+1 overlaps playback of chunk N, so playback does not pause while the next
+  // request waits for the TTS provider.
+  const speakModelSpeech = async (chunks: string[], tone: SpeechTone, signal: AbortSignal, session: number) => {
+    const first = chunks[0]
+    if (first === undefined) return true
+    const prepared: Array<Promise<PreparedSpeech>> = [prepareModelChunk(first, tone, signal, true)]
+    for (let index = 0; index < chunks.length; index += 1) {
+      const lookAhead = chunks[index + 1]
+      if (lookAhead !== undefined && prepared[index + 1] === undefined) {
+        prepared[index + 1] = prepareModelChunk(lookAhead, tone, signal, false)
+      }
+      const pending = prepared[index]
+      const chunkText = chunks[index]
+      if (pending === undefined || chunkText === undefined) return true
+      let chunk = await pending
+      if (session !== speechSession || signal.aborted) return true
+      if (chunk.kind === 'failed') {
+        // A look-ahead request can be rejected while the previous TTS request is still open;
+        // retry it once now that playback has moved on.
+        chunk = await prepareModelChunk(chunkText, tone, signal, false)
+        if (session !== speechSession || signal.aborted) return true
+      }
+      if (chunk.kind === 'failed') throw chunk.error
+      const ok = await playPreparedChunk(chunk, signal)
+      if (session !== speechSession) return true
+      if (!ok) { finishSpeechSession(session, false); return false }
+    }
+    return true
   }
 
   const speak = (text: unknown): boolean => {
     const voice = cfg.voice
     if (voice?.enabled !== true || typeof text !== 'string') return false
-    const clean = normalizeVoiceText(text)
-    if (clean === null) return false
+    // The server accepts VOICE_TEXT_MAX per request; chunk on sentence/word boundaries and speak
+    // every chunk in order so a long answer is never cut near the end.
+    const chunks = splitSpeechChunks(text, VOICE_TEXT_MAX)
+    if (chunks.length === 0) return false
     const tone = speechTone(text)
     stopSpeaking()
-    speechPending = true
+    const session = speechSession
+    // One abort signal for the whole reply: prefetched chunk requests stay valid until the reply is
+    // stopped or a new utterance replaces it.
+    const signal = speechRequest.start()
+    conversation.send({ type: 'SPEAK_START' })
     updateWaitingFeedback()
-    if (voice.provider !== 'browser') {
-      void speakModel(clean, tone)
-      return true
-    }
-    return speakBrowser(clean, tone)
+    void (async () => {
+      try {
+        if (voice.provider === 'browser') {
+          for (const chunk of chunks) {
+            if (session !== speechSession || signal.aborted) return
+            const ok = await speakBrowserChunk(chunk, tone, signal)
+            if (session !== speechSession) return
+            if (!ok) { finishSpeechSession(session, false); return }
+          }
+        } else {
+          const ok = await speakModelSpeech(chunks, tone, signal, session)
+          if (!ok) return
+        }
+        finishSpeechSession(session, true)
+      } catch (error) {
+        if (session !== speechSession) return
+        finishSpeechSession(session, false)
+        const code = error instanceof Error ? error.message : ''
+        showReply((code.startsWith('voice-') || code.startsWith('tts-')) ? voiceErrorMessage(code) : 'Не удалось озвучить ответ. Проверь настройки голоса и доступ к сервису.')
+      }
+    })()
+    return true
   }
 
   const interact = async (action: 'feed' | 'play') => {
@@ -1646,7 +1884,7 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
       })
       if (!res.ok) return // 403/413/500 are not successful interactions; do not emit hearts.
       const body = await res.json().catch(() => null)
-      if (body?.reply) { showReply(body.reply, { ms: chatBubbleMs(body.reply) }); speak(body.reply) }
+      if (body?.reply) showReply(body.reply, { ms: chatBubbleMs(body.reply) })
       spawnHearts()
     } catch {
       // Transient network error: the next poll will recover.
@@ -1719,6 +1957,12 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
     if (config.voice?.enabled === false || previousVoiceProvider !== cfg.voice.provider) { stopSpeaking(); cancelMicrophone() }
     if (config.voice?.conversation !== true) conversationResume.cancel()
     conversationMode = config.voice?.conversation === true
+    conversation.send({
+      type: 'CONFIG',
+      conversationMode,
+      voiceEnabled: cfg.voice.enabled === true,
+      userTyping: userTyping(),
+    })
     if (chatOpen) positionChat() // Pet size may change; keep the input attached to its position.
     syncChatAvailability()
     finishChatWhenIdle()
@@ -1739,10 +1983,9 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
         if (Number.isInteger(nextPet.level)) {
           if (lastLevel !== 0 && nextPet.level > lastLevel) {
             const phrase = pickPhrase(cfg.replies?.levelUp, { avoid: lastChatterPhrase })
-            if (phrase !== null) {
+            if (phrase !== null && !speechPending) {
               lastChatterPhrase = phrase
               showReply(phrase)
-              speak(phrase)
             }
             spawnHearts()
           }
@@ -1755,13 +1998,16 @@ export function apply(ctx: import('./client-host.js').ClientContext) {
         // Event changes (welcome/celebration/fright/disappointment) select a phrase from their
         // event pool.
         const name = act.name
+        const now = Date.now()
         if (lastActivityName !== null && name !== lastActivityName
-          && (name === 'welcome' || name === 'celebrate' || name === 'error' || name === 'disappointed')) {
+          && !speechPending
+          && (name === 'welcome' || name === 'celebrate' || name === 'error' || name === 'disappointed')
+          && (name !== 'celebrate' || celebratePhraseDue({ lastAt: lastCelebratePhraseAt, now }))) {
           const phrase = pickPhrase(cfg.replies?.[name], { avoid: lastChatterPhrase })
           if (phrase !== null) {
             lastChatterPhrase = phrase
+            if (name === 'celebrate') lastCelebratePhraseAt = now
             showReply(phrase)
-            speak(phrase)
           }
         }
         lastActivityName = name

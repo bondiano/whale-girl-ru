@@ -143,7 +143,8 @@ export const DEFAULTS = Object.freeze({
     sttModel: 'gpt-transcribe',          // current file-transcription model
     instructions: 'Говори как милая игривая девочка-кит', // Speaking-style instructions for supported TTS models.
     conversation: false,                // Conversation mode: listen again after each reply.
-    autoSpeakChat: true,                // Automatically speak chat replies.
+    autoSpeakChat: false,               // Opt-in: read only long chat replies aloud.
+    minSpeakChars: 200,                 // Minimum cleaned reply length for auto-speech; 0 reads any non-empty reply.
   },
   // Chat uses the host LLM service; history stays in process memory.
   chat: {
@@ -220,6 +221,7 @@ export function buildSchema() {
         instructions: z.string().default(DEFAULTS.voice.instructions).volatile(),
         conversation: z.boolean().default(DEFAULTS.voice.conversation).volatile(),
         autoSpeakChat: z.boolean().default(DEFAULTS.voice.autoSpeakChat).volatile(),
+        minSpeakChars: z.number().min(0).max(2000).default(DEFAULTS.voice.minSpeakChars).volatile(),
       }),
       chat: z.object({
         enabled: z.boolean().default(DEFAULTS.chat.enabled).volatile(),

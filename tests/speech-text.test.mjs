@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanSpeechText, speechTone, toneInstructions } from '../dist/core/speech-text.js'
+import { cleanSpeechText, shouldSpeakReply, speechTone, splitSpeechChunks, toneInstructions } from '../dist/core/speech-text.js'
 import { normalizeVoiceText, buildRealtimeVoiceRequest, buildTtsRequest } from '../dist/core/voice.js'
 
 test('every speech path removes complete emoji sequences without losing numbers or words', () => {
@@ -33,4 +33,40 @@ test('automatic delivery chooses mood without sending emoji or mood labels as sp
   assert.equal(speechTone('Как идёт работа?'), 'curious')
   assert.equal(speechTone('Проверь граничный случай в тесте.'), 'focused')
   assert.equal(speechTone('Я рядом.'), 'warm')
+})
+
+
+test('splitSpeechChunks: длинный ответ делится по границам и не теряет слова', () => {
+  const sentence = 'Это длинное предложение про кита, код и проверку гипотез. '
+  const text = sentence.repeat(12).trim()
+  const chunks = splitSpeechChunks(text, 300)
+  assert.ok(chunks.length > 1)
+  for (const chunk of chunks) {
+    assert.ok(chunk.length > 0)
+    assert.ok(chunk.length <= 300, `chunk over limit: ${chunk.length}`)
+  }
+  assert.equal(chunks.join(' '), cleanSpeechText(text))
+  // Sentence boundaries are preferred, so chunks end with punctuation rather than mid-word.
+  assert.match(chunks[0], /[.!?…]$/)
+})
+
+test('splitSpeechChunks: слово длиннее лимита режется, пустой текст → []', () => {
+  const chunks = splitSpeechChunks('я'.repeat(650), 300)
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [300, 300, 50])
+  assert.equal(chunks.join(''), 'я'.repeat(650))
+  assert.deepEqual(splitSpeechChunks('   '), [])
+  assert.deepEqual(splitSpeechChunks(null), [])
+})
+
+test('shouldSpeakReply: только явный opt-in и длинный ответ', () => {
+  const long = 'а'.repeat(200)
+  assert.equal(shouldSpeakReply(long, { enabled: true, autoSpeakChat: true, minSpeakChars: 200 }), true)
+  assert.equal(shouldSpeakReply('коротко', { enabled: true, autoSpeakChat: true, minSpeakChars: 200 }), false)
+  // Старый конфиг без порога (когда авточтение было включено по умолчанию) молчит до нового opt-in.
+  assert.equal(shouldSpeakReply(long, { enabled: true, autoSpeakChat: true }), false)
+  assert.equal(shouldSpeakReply(long, { enabled: true, autoSpeakChat: false, minSpeakChars: 0 }), false)
+  assert.equal(shouldSpeakReply(long, { enabled: false, autoSpeakChat: true, minSpeakChars: 0 }), false)
+  // 0 is a deliberate "read any non-empty reply" opt-in, but empty text still stays silent.
+  assert.equal(shouldSpeakReply('привет', { enabled: true, autoSpeakChat: true, minSpeakChars: 0 }), true)
+  assert.equal(shouldSpeakReply('🐳', { enabled: true, autoSpeakChat: true, minSpeakChars: 0 }), false)
 })

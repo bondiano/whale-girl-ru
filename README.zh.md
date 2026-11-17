@@ -50,7 +50,7 @@ dsh plugin --profile web add whale-girl                        # npm package, in
 
 菜单 **⚙️ Настройки** 打开插件设置。菜单中的 **🐳 «Как дела?»** 查询 DSH 当前选中的会话。`chat.sessionContext` 控制是否发送活动状态及最多六条可见用户/助手消息（每条 400 字符）；不发送工具输出、推理或系统提示。聊天历史按模型与会话隔离，只留在进程内存。
 
-语音默认关闭。`browser` 使用系统语音及浏览器识别；`openai` 明确选择**单独计费的 API**，默认 `gpt-transcribe` 识别、Realtime `gpt-realtime-2.1-mini` 配 `marin` 合成，密钥只留在服务端。显式兼容模型保留 `/audio/speech`。错误会显示，不自动换提供方。麦克风录音最多 30 秒；对话模式在回复后继续听，Esc/关闭停止。
+语音默认关闭。`browser` 使用系统语音及浏览器识别；`openai` 明确选择**单独计费的 API**，默认 `gpt-transcribe` 识别、Realtime `gpt-realtime-2.1-mini` 配 `marin` 合成，密钥只留在服务端。显式兼容模型保留 `/audio/speech`。错误会显示，不自动换提供方。麦克风录音最多 30 秒；对话模式在回复后继续听，Esc/关闭停止。任何文本框获得焦点（包括主聊天）或宠物输入框有草稿时，麦克风不会开启，打字不会被当成随机语音消息。
 
 **ChatGPT 订阅不支持此音频接口**，见 [SIWC 限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)；`subscription` 在联网前拒绝。新闻按需读取 RSS/Atom。
 
@@ -116,7 +116,8 @@ whale-girl:
     sttModel: gpt-transcribe      # Microphone transcription model
     instructions: Говори как милая игривая девочка-кит  # Speech style for Realtime and gpt-4o*-tts
     conversation: false      # Conversation mode default
-    autoSpeakChat: true      # Speak chat replies
+    autoSpeakChat: false     # read only long chat replies (opt-in)
+    minSpeakChars: 200       # auto-speech threshold; 0 = any non-empty reply
   chat:
     enabled: true
     provider: ''             # Empty = host model

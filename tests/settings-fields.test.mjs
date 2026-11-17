@@ -163,7 +163,7 @@ test('文案池文本 ↔ 数组：trim、去空行、行尾空行不产生空�
 test('CARD_FIELDS：字段表完整性（路径唯一、种类合法、范围合理）', () => {
   const paths = CARD_FIELDS.map((f) => f.path)
   assert.equal(new Set(paths).size, paths.length, '路径必须唯一')
-  assert.equal(paths.length, 24, '字段数量与设置卡一致')
+  assert.equal(paths.length, 26, '字段数量与设置卡一致')
   for (const f of CARD_FIELDS) {
     assert.ok(['toggle', 'number', 'lines', 'text', 'multiline', 'model', 'select'].includes(f.kind), `${f.path}: 种类合法`)
     if (f.kind === 'select') assert.ok(Array.isArray(f.options) && f.options.length > 0, `${f.path}: селект с вариантами`)
@@ -180,11 +180,11 @@ test('CARD_FIELDS：字段表完整性（路径唯一、种类合法、范围合
   // UI field coverage: toggles, numbers, and reply pools.
   assert.deepEqual(
     CARD_FIELDS.filter((f) => f.kind === 'toggle').map((f) => f.path),
-    ['enabled', 'sessionMemory', 'walk.enabled', 'voice.enabled', 'voice.conversation', 'chat.enabled', 'news.enabled'],
+    ['enabled', 'sessionMemory', 'walk.enabled', 'voice.enabled', 'voice.autoSpeakChat', 'voice.conversation', 'chat.enabled', 'news.enabled'],
   )
   assert.deepEqual(
     CARD_FIELDS.filter((f) => f.kind === 'number').map((f) => f.path),
-    ['size', 'opacity', 'sleepAfterMs', 'voice.rate', 'news.maxItems'],
+    ['size', 'opacity', 'sleepAfterMs', 'voice.rate', 'voice.minSpeakChars', 'news.maxItems'],
   )
 })
 

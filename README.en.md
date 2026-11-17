@@ -57,7 +57,9 @@ Full state machine (priorities / transitions / triggers): [docs/state-machine.md
 
 Voice is disabled initially. `browser` uses system speech and browser recognition (`ru-RU`). `openai` explicitly selects the **separately billed OpenAI API**: `gpt-transcribe` for recognition, Realtime `gpt-realtime-2.1-mini` with `marin` for speech. Credentials stay on the server (`WHALE_GIRL_TTS_API_KEY` or `voice.apiKey`). Explicit speech-compatible model settings retain `/audio/speech`. Provider and microphone failures are visible, with no automatic provider substitution.
 
-**Subscription audio is unavailable** under the [supported SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). Selecting `subscription` refuses audio before network or credential access. Microphone clips are capped at 30 seconds; conversation mode listens again after replies and stops with Escape, its toggle or chat close.
+The chat and microphone lifecycle is one xstate machine (`src/client/conversation-machine.ts`): closed chat, composing, waiting, reveal and speech cannot overlap in an impossible combination. Hands-free listening resumes only after a spoken reply and only while no text field is focused; automatic recognition errors stay silent.
+
+**Subscription audio is unavailable** under the [supported SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). Selecting `subscription` refuses audio before network or credential access. Microphone clips are capped at 30 seconds; conversation mode listens again after replies and stops with Escape, its toggle or chat close. While any text field has focus (including the host chat) or the pet composer holds a draft, the microphone stays off, so typing never becomes a random spoken message.
 
 Build with Node ≥24: `npm ci`, `npm test`, `npm run typecheck`, then `node scripts/gates/run.mjs`. TypeScript sources are in `src/`, compiled code in `dist/`, and the generated DSH browser wrapper in `lib/client.js`. macOS and WSL installers build the same plugin. Backend changes need a DSH restart after active sessions finish.
 
@@ -121,7 +123,8 @@ whale-girl:
     sttModel: gpt-transcribe      # speech-to-text model for the microphone
     instructions: Говори как милая игривая девочка-кит  # Speech style for Realtime and gpt-4o*-tts
     conversation: false      # conversation-mode default
-    autoSpeakChat: true      # speak chat replies
+    autoSpeakChat: false     # read only long chat replies (opt-in)
+    minSpeakChars: 200       # auto-speech threshold; 0 = any non-empty reply
   chat:
     enabled: true
     provider: ''             # empty = host model

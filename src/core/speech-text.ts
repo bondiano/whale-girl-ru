@@ -11,6 +11,69 @@ export function cleanSpeechText(raw: unknown): string {
     .trim()
 }
 
+/** Longest speech chunk accepted by the TTS boundary; matches VOICE_TEXT_MAX without importing voice.ts. */
+const SPEECH_CHUNK_MAX = 300
+
+/** Return the end of the last sentence, clause, or word boundary inside the window, if any. */
+function lastBreakEnd(window: string, pattern: RegExp): number {
+  let end = 0
+  for (const match of window.matchAll(pattern)) end = (match.index ?? 0) + match[0].length
+  return end
+}
+
+/**
+ * Split a reply into TTS-sized chunks without dropping words. Boundaries are preferred in this
+ * order: sentence punctuation, clause punctuation, dash, whitespace. A single word longer than
+ * the limit is cut at the limit because no boundary exists; joining chunks cut on whitespace with
+ * single spaces reproduces the cleaned text.
+ */
+export function splitSpeechChunks(raw: unknown, max = SPEECH_CHUNK_MAX): string[] {
+  const restText = cleanSpeechText(raw)
+  if (restText === '') return []
+  const limit = Number.isFinite(max) ? Math.max(1, Math.floor(Number(max))) : SPEECH_CHUNK_MAX
+  const chunks: string[] = []
+  let rest = restText
+  while (rest !== '') {
+    const chars = Array.from(rest)
+    if (chars.length <= limit) {
+      chunks.push(rest)
+      break
+    }
+    const window = chars.slice(0, limit).join('')
+    const cut = lastBreakEnd(window, /[.!?…]["»']?\s/g)
+      || lastBreakEnd(window, /[,;:]\s/g)
+      || lastBreakEnd(window, /[—–-]\s/g)
+      || lastBreakEnd(window, /\s/g)
+      || window.length
+    const piece = window.slice(0, cut).trim()
+    if (piece !== '') chunks.push(piece)
+    rest = rest.slice(cut).trimStart()
+  }
+  return chunks
+}
+
+/** Voice fields that decide whether a chat reply is read aloud; kept structural for the client bundle. */
+export interface SpeakReplyVoice {
+  enabled?: unknown;
+  autoSpeakChat?: unknown;
+  minSpeakChars?: unknown;
+}
+
+/**
+ * Long-answer auto-speech is opt-in and needs an explicit length threshold. A voice block without
+ * minSpeakChars predates this mode (when auto-read defaulted on), so it stays silent instead of
+ * reviving reading from stale settings.
+ */
+export function shouldSpeakReply(text: unknown, voice: SpeakReplyVoice | null | undefined): boolean {
+  if (voice === null || typeof voice !== 'object') return false
+  if (voice.enabled !== true || voice.autoSpeakChat !== true) return false
+  if (typeof voice.minSpeakChars !== 'number' || !Number.isFinite(voice.minSpeakChars)) return false
+  const clean = cleanSpeechText(text)
+  if (clean === '') return false
+  const minimum = Math.max(0, Math.floor(voice.minSpeakChars))
+  return minimum === 0 || Array.from(clean).length >= minimum
+}
+
 const TONES = {
   warm: 'Произнеси тепло, дружелюбно и естественно.',
   cheerful: 'Произнеси радостно и с лёгким воодушевлением, без крика.',

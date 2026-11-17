@@ -2,7 +2,20 @@
 // without hunger or persistent negative-mood state.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickState, TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, STATE_TABLE, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS, shouldDimForDialogs, voiceErrorMessage, chatBubbleDuration } from '../dist/client/logic.js'
+import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, STATE_NAMES, PLAYBACK_MODES, PLAYBACK_MIN_FRAMES, deriveSessionMood, nextWorkingRhythm, detectTurnCompleted, shouldWake, nextBlinkAt, nextFacingAt, facingFromDrag, wakeFromInteraction, memoryLine, pickPhrase, nextChatterAt, CHATTER_MIN_MS, CHATTER_MAX_MS, CELEBRATE_PHRASE_COOLDOWN_MS, celebratePhraseDue, bubbleWaitsForSpeech, shouldDimForDialogs, voiceErrorMessage, chatBubbleDuration } from '../dist/client/logic.js'
+import { createActor } from 'xstate'
+import { ANIMATION_BURST_STATES, ANIMATION_PRIORITY, animationMachine, animationStateOf } from '../dist/client/animation-machine.js'
+
+// Pure-test projection of the same xstate machine the host drives.
+function pickState(input) {
+  const actor = createActor(animationMachine).start()
+  try {
+    actor.send({ type: 'UPDATE', input })
+    return animationStateOf(actor.getSnapshot())
+  } finally {
+    actor.stop()
+  }
+}
 
 const IDLE = { activity: { name: 'idle', until: 0 }, dragging: false, transient: null, sleeping: false, joyUntil: 0, now: 1000 }
 
@@ -158,18 +171,14 @@ test('deriveSessionMood：空/未就绪快照与缺字段行安全（服务不�
   }
 })
 
-test('STATE_TABLE 文法单源：表内状态全部在 STATE_NAMES，idle 兜底在末行', () => {
-  const last = STATE_TABLE[STATE_TABLE.length - 1]
-  assert.equal(last.state, 'idle') // The fallback row must remain last.
-  assert.equal(last.when({}), true) // Always matches.
-  for (const row of STATE_TABLE) {
-    // Dynamic burst resolutions must also belong to STATE_NAMES.
-    for (const s of ['welcome', 'celebrate', 'error', 'disappointed']) assert.ok(STATE_NAMES.includes(s))
-    if (row.state !== 'burst') assert.ok(STATE_NAMES.includes(row.state), `STATE_TABLE 状态 ${row.state} 不在 STATE_NAMES`)
-  }
+test('xstate 动画机器是状态单源：稳定状态节点与 STATE_NAMES 一致', () => {
+  const machineStates = Object.keys(animationMachine.states)
+  for (const name of STATE_NAMES) assert.ok(machineStates.includes(name), `машина не содержит состояние ${name}`)
+  assert.equal(machineStates.filter((name) => name !== 'checking').length, STATE_NAMES.length)
+  for (const name of ANIMATION_BURST_STATES) assert.ok(STATE_NAMES.includes(name))
 })
 
-test('STATE_TABLE 行序即优先级：手动验证关键竞争', () => {
+test('机器优先级列表：手动验证关键竞争', () => {
   // drag wins even when every other condition matches.
   assert.equal(pickState({ ...IDLE, dragging: true, transient: 'eat', sessionWait: true, sleeping: true, walking: true }), 'drag')
   // An active welcome burst outranks an eat transient.
@@ -182,14 +191,11 @@ test('STATE_TABLE 行序即优先级：手动验证关键竞争', () => {
   assert.equal(pickState({ ...IDLE, sessionThink: true, celebrateUntil: 2000, now: 1000 }), 'celebrate')
 })
 
-test('STATE_TABLE 全序由 verify-spec-states 门禁守护（state-machine.md 优先级列表 ↔ 行序）', () => {
-  // The gate checks documented priority against STATE_TABLE, avoiding a third
-  // copy of the order here. Assert only a nonempty table, dynamic burst row, and final idle fallback.
-  assert.ok(STATE_TABLE.length >= 10)
-  assert.equal(STATE_TABLE.some((r) => r.state === 'burst' && typeof r.resolve === 'function'), true)
-  const last = STATE_TABLE[STATE_TABLE.length - 1]
-  assert.equal(last.state, 'idle')
-  assert.equal(last.when({}), true)
+test('机器优先级全序由 verify-spec-states 门禁守护（state-machine.md ↔ ANIMATION_PRIORITY）', () => {
+  // The gate checks the documented list against ANIMATION_PRIORITY; assert only its shape here.
+  assert.ok(ANIMATION_PRIORITY.length >= 10)
+  assert.equal(ANIMATION_PRIORITY.at(-1), 'idle')
+  for (const name of ANIMATION_PRIORITY) assert.ok(STATE_NAMES.includes(name), `приоритет ${name} не входит в STATE_NAMES`)
 })
 
 test('拖拽放下缓冲：dragReleaseUntil 内短暂回 idle，再进入底层状态', () => {
@@ -407,6 +413,22 @@ test('pickPhrase: не повторяет предыдущую фразу под
 test('nextChatterAt: интервал в диапазоне CHATTER_MIN_MS..CHATTER_MAX_MS', () => {
   assert.equal(nextChatterAt({ now: 1000, random: () => 0 }), 1000 + CHATTER_MIN_MS)
   assert.equal(nextChatterAt({ now: 1000, random: () => 1 }), 1000 + CHATTER_MAX_MS)
+})
+
+test('celebratePhraseDue: первая победа говорит, следующие — не чаще кулдауна', () => {
+  const now = 1_000_000
+  assert.equal(celebratePhraseDue({ lastAt: 0, now }), true, 'ещё не поздравляли')
+  assert.equal(celebratePhraseDue({ lastAt: now - CELEBRATE_PHRASE_COOLDOWN_MS + 1, now }), false, 'кулдаун ещё идёт')
+  assert.equal(celebratePhraseDue({ lastAt: now - CELEBRATE_PHRASE_COOLDOWN_MS, now }), true, 'граница кулдауна')
+  assert.equal(celebratePhraseDue({ lastAt: Number.NaN, now }), true, 'битое время не блокирует навсегда')
+  assert.equal(celebratePhraseDue({ lastAt: now, now, cooldown: 0 }), true, 'нулевой кулдаун отключает паузу')
+})
+
+test('bubbleWaitsForSpeech: держит облачко только у читаемого активного ответа', () => {
+  assert.equal(bubbleWaitsForSpeech({ speechPending: true, isSpeakingBubble: true, isActive: true }), true)
+  assert.equal(bubbleWaitsForSpeech({ speechPending: false, isSpeakingBubble: true, isActive: true }), false)
+  assert.equal(bubbleWaitsForSpeech({ speechPending: true, isSpeakingBubble: false, isActive: true }), false, 'чужое облачко не держим')
+  assert.equal(bubbleWaitsForSpeech({ speechPending: true, isSpeakingBubble: true, isActive: false }), false, 'заменённое облачко не держим')
 })
 
 test('shouldDimForDialogs: свой чат не гасит питомца, чужой видимый диалог — гасит', () => {

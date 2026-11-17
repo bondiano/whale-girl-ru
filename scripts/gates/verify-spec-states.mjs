@@ -1,11 +1,12 @@
 // Cross-check the sprite specification's declared count, state rows, STATE_NAMES,
 // STATE_TABLE including dynamic burst values, and each character's manifest playback.
-// The state-machine priority list must match STATE_TABLE row order.
+// The state-machine priority list must match the xstate `checking` guard order.
 // This read-only deterministic check catches syntactically valid semantic drift.
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { STATE_NAMES, STATE_TABLE } from '../../dist/client/logic.js'
+import { STATE_NAMES } from '../../dist/client/logic.js'
+import { ANIMATION_BURST_STATES, ANIMATION_PRIORITY, animationMachine } from '../../dist/client/animation-machine.js'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 // The authoritative state-table heading declares a count verified against its rows.
@@ -56,14 +57,26 @@ export function check(root = ROOT) {
   for (const name of specSet) {
     if (!nameSet.has(name)) errors.push(`spec 状态总表有 ${name}，client STATE_NAMES 缺（须同步 client/logic.mjs）`)
   }
-  // Every row state, including dynamic burst resolutions, must belong to STATE_NAMES.
-  for (const row of STATE_TABLE) {
-    if (row.state !== 'burst' && !nameSet.has(row.state)) {
-      errors.push(`STATE_TABLE 行状态 ${row.state} 不在 STATE_NAMES（新增状态须同步权威集合与 spec）`)
-    }
+  // The machine's stable nodes are the authoritative state vocabulary; `checking` is transient.
+  const machineStates = Object.keys(animationMachine.states).filter((name) => name !== 'checking')
+  for (const name of nameSet) {
+    if (!machineStates.includes(name)) errors.push(`STATE_NAMES 有 ${name}，xstate 动画机器缺该稳定状态`)
   }
-  for (const dynamic of ['welcome', 'celebrate', 'error', 'disappointed']) {
-    if (!nameSet.has(dynamic)) errors.push(`burst 动态解析值 ${dynamic} 不在 STATE_NAMES`)
+  for (const name of machineStates) {
+    if (!nameSet.has(name)) errors.push(`xstate 动画机器有稳定状态 ${name}，STATE_NAMES 缺（须同步）`)
+  }
+  for (const name of ANIMATION_BURST_STATES) {
+    if (!nameSet.has(name)) errors.push(`burst 动态状态 ${name} 不在 STATE_NAMES`)
+  }
+  // Every priority target must be a declared state; the final guard is the idle fallback.
+  for (const name of ANIMATION_PRIORITY) {
+    if (!nameSet.has(name)) errors.push(`ANIMATION_PRIORITY 含未知状态 ${name}`)
+  }
+  if (ANIMATION_PRIORITY.at(-1) !== 'idle') errors.push('ANIMATION_PRIORITY 最后一项必须是 idle 兜底')
+  // The exported priority must be the actual `checking` guard order, not a parallel list.
+  const guardOrder = (animationMachine.config.states?.checking?.always ?? []).map((guard) => guard.target)
+  if (JSON.stringify(guardOrder) !== JSON.stringify([...ANIMATION_PRIORITY])) {
+    errors.push(`xstate checking guards [${guardOrder.join(', ')}] ≠ ANIMATION_PRIORITY [${ANIMATION_PRIORITY.join(', ')}]`)
   }
   // Cross-check documented playback semantics with each manifest entry.
   const manifestPath = join(root, 'lib', 'assets', 'manifest.json')
@@ -90,15 +103,12 @@ export function check(root = ROOT) {
   } catch {
     // The asset gate owns unreadable or malformed manifests; avoid duplicate failures here.
   }
-  // The documentation priority list must match STATE_TABLE row order.
+  // The documentation priority list must match the machine's guard order.
   const docOrder = parsePriorityList(join(root, 'docs', 'state-machine.md'))
   if (docOrder === null) {
     errors.push('docs/state-machine.md 缺少「## 优先级」逐行列表（N. 行，verify-spec-states 机械校验行序）')
-  } else {
-    const tableOrder = STATE_TABLE.map((r) => r.state)
-    if (JSON.stringify(docOrder) !== JSON.stringify(tableOrder)) {
-      errors.push(`优先级列表行序 [${docOrder.join(', ')}] ≠ STATE_TABLE 行序 [${tableOrder.join(', ')}]（文档与文法单源漂移）`)
-    }
+  } else if (JSON.stringify(docOrder) !== JSON.stringify([...ANIMATION_PRIORITY])) {
+    errors.push(`优先级列表行序 [${docOrder.join(', ')}] ≠ ANIMATION_PRIORITY [${ANIMATION_PRIORITY.join(', ')}]（文档与 xstate 守卫序漂移）`)
   }
   return { ok: errors.length === 0, errors }
 }
@@ -137,5 +147,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     console.error(`[verify-spec-states] ${errors.length} 处违规`)
     process.exit(1)
   }
-  console.log(`[verify-spec-states] OK（${STATE_NAMES.length} 状态与 spec 总表一致）`)
+  console.log(`[verify-spec-states] OK（${STATE_NAMES.length} 状态、xstate 节点与优先级列表一致）`)
 }

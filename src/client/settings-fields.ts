@@ -51,6 +51,10 @@ export const CARD_FIELDS: CardField[] = [
   { path: 'voice.voice', labelKey: 'voiceName', kind: 'text' },
   { path: 'voice.apiKeyEnv', labelKey: 'voiceApiKeyEnv', kind: 'text' },
   { path: 'voice.rate', labelKey: 'voiceRate', kind: 'number', min: 0.5, max: 2, step: 0.1 },
+  // Long-answer auto-speech is opt-in; the threshold separates short replies from answers worth
+  // reading aloud. Ambient and event phrases never enter this path.
+  { path: 'voice.autoSpeakChat', labelKey: 'voiceAutoSpeak', kind: 'toggle' },
+  { path: 'voice.minSpeakChars', labelKey: 'voiceMinSpeakChars', kind: 'number', min: 0, max: 2000, step: 10 },
   // Conversation mode resumes listening after a reply regardless of TTS/STT provider.
   { path: 'voice.conversation', labelKey: 'voiceConversation', kind: 'toggle' },
   // Chat controls: enable, select a model (virtual chat.route writes provider and model), and

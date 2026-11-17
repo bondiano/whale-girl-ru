@@ -23,7 +23,7 @@
 - **动作**：宠物表现出的动画状态（idle、working、celebrate……15 个）
 - **槽位**：角色为每个动作提供的资源位（sheet 文件 + 播放参数）
 
-**关键原则：事件→动作映射是全角色共通的行为文法（STATE_TABLE），角色只能填充槽位（资源），不能改触发逻辑。** 加「新动作」是平台级变更（改 STATE_TABLE），加「新角色」是资源级变更（填槽位）——两者完全不同，见下。
+**关键原则：事件→动作映射是全角色共通的行为文法（`animation-machine.ts` 的 guards），角色只能填充槽位（资源），不能改触发逻辑。** 加「新动作」是平台级变更（改 xstate 机器），加「新角色」是资源级变更（填槽位）——两者完全不同，见下。
 
 ## 一、事件 → 动作映射（谁能触发什么）
 
@@ -97,15 +97,15 @@
 2. **调表现参数**：每动作 frames/fps/playback/motion；角色 stageSize
 
 ### ❌ 角色不能（行为级，需平台变更）
-1. **新增动作**（如「猫的舔毛」）——那是加状态 = 改 STATE_TABLE + STATE_NAMES + spec + 门禁
+1. **新增动作**（如「猫的舔毛」）——那是加状态 = 改 `ANIMATION_STATE_NAMES` + `checking` guard + spec + 门禁
 2. **改触发条件**（如「失败时跳三下」）——触发是行为文法，全角色共通
-3. **改优先级**（如「让 walk 优先于 think」）——STATE_TABLE 行序是全局的
+3. **改优先级**（如「让 walk 优先于 think」）——`checking` guard 顺序是全局的
 4. **改 XP/称号**（成长语义，见 growth-system.md 边界）
 
 ### ⚠️ 新动作（平台级）需要什么（4 步）
-1. `src/client/logic.ts` STATE_NAMES 加状态名 + STATE_TABLE 加行（含 when/resolve）
+1. `src/client/animation-machine.ts` 的 `ANIMATION_STATE_NAMES` 加状态名 + `checking` 加 guard（位置决定优先级）
 2. `assets/manifest.json` 每个角色 states 加条目（**必填 sheet**）
-3. `docs/sprites-spec.md` 状态总表同步（门禁强制 spec↔STATE_NAMES↔STATE_TABLE）
+3. `docs/sprites-spec.md` 状态总表同步（门禁强制 spec↔STATE_NAMES↔xstate 节点）
 4. 决策记录（行为文法变更）
 
 ## 四、动手步骤（加一个角色）
@@ -122,5 +122,5 @@
 | 门禁 | 校验 |
 |---|---|
 | `verify-assets` | **15 状态全量齐备**/sheet 存在/扩展名白名单/frames 正整数/**playback 枚举 + 帧数下限**/PNG 宽=帧数×高/motion 白名单 + frames:1/角色 id `[a-z0-9-]`/default 指向存在角色 |
-| `verify-spec-states` | 状态总表 ↔ STATE_NAMES ↔ STATE_TABLE 一致（15 状态封闭集合） |
+| `verify-spec-states` | 状态总表 ↔ STATE_NAMES ↔ xstate 稳定节点 ↔ ANIMATION_PRIORITY 一致（15 状态封闭集合） |
 | `verify-client-smoke` | 浏览器渲染 + transform 合法 |

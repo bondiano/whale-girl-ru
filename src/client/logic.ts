@@ -1,16 +1,16 @@
+import { ANIMATION_STATE_NAMES } from './animation-machine.js'
 import type { MemoryRecall, SessionCatalog } from './types.js'
-// Pure client animation-state/expression selection with no DOM dependency, independently testable.
-// pickState accepts { activity, pet, dragging, transient, sleeping, joyUntil, now, sessionThink,
-// sessionWait, workingActive, celebrateUntil } and returns an animation state. Pet attributes do
-// not drive state: there is no hunger/mood negative feedback. STATE_TABLE order is the single
-// source of priority; Node supplies factual burst windows { name, until }, while the client selects
-// local interactions. drag/burst/transient are temporary overrides: rederive the underlying state
-// afterward rather than hardcoding idle. The host times transients, including TRANSIENT_MS safety;
-// activity.until bounds bursts. Host sessionThink/sessionWait signals keep companionship awake
-// across any active session, overriding sleep/walk but yielding to interactions/events. working is
-// an occasional client-scheduled interlude (workingActive), not a task indicator; think is normal.
-// Client celebrateUntil marks turn completion and has lower priority than Node task-completion
-// bursts.
+// Pure client expression/scheduling logic with no DOM dependency, independently testable. Pet
+// attributes do not drive state: there is no hunger/mood negative feedback. The visible animation
+// state is owned by the xstate machine in animation-machine.ts, with no separate priority table.
+// Node supplies factual burst windows { name, until }, while
+// the client selects local interactions. drag/burst/transient are temporary overrides: rederive the
+// underlying state afterward rather than hardcoding idle. The host times transients, including
+// TRANSIENT_MS safety; activity.until bounds bursts. Host sessionThink/sessionWait signals keep
+// companionship awake across any active session, overriding sleep/walk but yielding to
+// interactions/events. working is an occasional client-scheduled interlude (workingActive), not a
+// task indicator; think is normal. Client celebrateUntil marks turn completion and has lower
+// priority than Node task-completion bursts.
 
 export const TRANSIENT_MS = 1500
 // Wake has a distinct duration from short eat/play actions: non-looping wake sheets hold their
@@ -22,11 +22,8 @@ export { TURN_COMPLETED_MS as ROUND_CELEBRATE_MS } from '../core/snapshot.js'
 
 // Authoritative state names: all characters require sheets for all 15 states, without emoji
 // fallback. docs/sprites-spec.md is the source table; verify-spec-states checks that table, this
-// set, and STATE_TABLE including dynamic burst values agree.
-export const STATE_NAMES = Object.freeze([
-  'idle', 'working', 'celebrate', 'error', 'disappointed', 'joy', 'eat', 'play',
-  'drag', 'walk', 'sleep', 'wake', 'welcome', 'think', 'wait',
-])
+// set, the xstate machine's state nodes, and the documented priority order agree.
+export const STATE_NAMES: readonly string[] = ANIMATION_STATE_NAMES
 
 // Frame playback modes are required per manifest state; the player follows them instead of
 // special-casing state names. loop: 0->1->...->N-1->0, with frame 0 the default pose. pingpong:
@@ -38,64 +35,6 @@ export const PLAYBACK_MODES = Object.freeze(['loop', 'pingpong', 'once', 'blink'
 export const PLAYBACK_MIN_FRAMES = Object.freeze({
   loop: 1, pingpong: 2, once: 1, blink: 2,
 })
-
-/**
- * State-priority grammar: the first matching row wins. when evaluates the input context; resolve
- * returns the selected state, usually the row's state but activity.name for burst. All results must
- * belong to STATE_NAMES; verify-spec-states checks the specification table, names, and row order.
- */
-interface StateInput { activity?: { name: string; until: number }; dragging?: boolean; walking?: boolean; transient?: string | null; sleeping?: boolean; joyUntil?: number; now?: number; sessionThink?: boolean; sessionWait?: boolean; dragReleaseUntil?: number; workingActive?: boolean; celebrateUntil?: number }
-type StateContext = Required<StateInput> & { activity: { name: string; until: number } }
-interface StateRule { state: string; when: (c: StateContext) => boolean | undefined; resolve?: (c: StateContext) => string }
-export const STATE_TABLE: StateRule[] = [
-  { state: 'drag', when: (c) => c.dragging },
-  // After drag release, hold idle for 1.5 s before deriving think/working. A pet dragged from sleep
-  // yields directly to wake rather than first entering the idle buffer. Wake still ranks below
-  // bursts/eat/play so event feedback takes precedence.
-  { state: 'idle', when: (c) => c.dragReleaseUntil > c.now && c.transient !== 'wake' },
-  // Node event bursts (welcome/celebrate/error/disappointed) take precedence while their until
-  // deadline is valid.
-  { state: 'burst', when: (c) => c.activity.name !== 'idle' && c.activity.name !== 'working' && c.activity.until > c.now, resolve: (c) => c.activity.name },
-  { state: 'eat', when: (c) => c.transient === 'eat' },
-  { state: 'play', when: (c) => c.transient === 'play' },
-  { state: 'wake', when: (c) => c.transient === 'wake' },
-  { state: 'wait', when: (c) => c.sessionWait },
-  // Client turn-completion celebration uses running->completed edges. It ranks below Node bursts
-  // (including task completion), user interactions, and wait approval prompts, but above ordinary
-  // companionship. This brief interlude must not interrupt interaction feedback.
-  { state: 'celebrate', when: (c) => c.celebrateUntil > c.now },
-  // working is an occasional client-scheduled interlude (workingActive) during thinking
-  // companionship, not a task-status indicator. think is the default; working adds a brief working
-  // pose.
-  { state: 'working', when: (c) => c.workingActive },
-  { state: 'think', when: (c) => c.sessionThink },
-  { state: 'joy', when: (c) => c.now < c.joyUntil },
-  { state: 'sleep', when: (c) => c.sleeping },
-  { state: 'walk', when: (c) => c.walking },
-  { state: 'idle', when: () => true },
-]
-
-/**
- * Choose the current animation from the first matching STATE_TABLE row; explicit now makes tests
- * deterministic.
- */
-export function pickState(input: StateInput) {
-  const ctx: StateContext = {
-    activity: { name: 'idle', until: 0 }, dragging: false, walking: false, transient: null, sleeping: false,
-    ...input,
-    now: input.now ?? Date.now(),
-    joyUntil: input.joyUntil ?? 0,
-    sessionThink: input.sessionThink ?? false,
-    sessionWait: input.sessionWait ?? false,
-    dragReleaseUntil: input.dragReleaseUntil ?? 0,
-    workingActive: input.workingActive ?? false,
-    celebrateUntil: input.celebrateUntil ?? 0,
-  }
-  for (const row of STATE_TABLE) {
-    if (row.when(ctx)) return row.resolve ? row.resolve(ctx) : row.state
-  }
-  return 'idle'
-}
 
 /**
  * Aggregate companionship from the host sessions snapshot across all active sessions, not just the
@@ -136,6 +75,19 @@ export const WORKING_MAX_DUR_MS = 6000   // Maximum interlude duration.
 // rather than defining personality; phrase pools remain configurable.
 export const CHATTER_MIN_MS = 45000
 export const CHATTER_MAX_MS = 110000
+
+// Every settled job opens a celebration window. Speaking a phrase for each one turns praise into
+// noise, so completion phrases keep a quiet cooldown while the animation still plays every time.
+export const CELEBRATE_PHRASE_COOLDOWN_MS = 300000
+
+/**
+ * Whether a completion phrase is due: true once per cooldown, starting with the first completion.
+ * A missing or non-positive timestamp counts as never spoken.
+ */
+export function celebratePhraseDue({ lastAt, now, cooldown = CELEBRATE_PHRASE_COOLDOWN_MS }: { lastAt: number; now: number; cooldown?: number }) {
+  if (!Number.isFinite(lastAt) || lastAt <= 0) return true
+  return now - lastAt >= cooldown
+}
 
 /**
  * Choose a phrase from a pool; return null for empty/invalid pools. avoid is the previous phrase:
@@ -223,7 +175,7 @@ export function nextWorkingRhythm({ now, sessionThink, working, random = Math.ra
  * Wake on the visual edge from sleep to another state, unless interrupted by dragging or an
  * existing transient.
  * @param {string} prevState Previous displayed animState.
- * @param {string} nextState Target from pickState.
+ * @param {string} nextState Target from the animation machine.
  * @param {object} ctx { dragging, transient }.
  * @returns {boolean} Whether to play wake.
  */
@@ -313,6 +265,11 @@ export function shouldDimForDialogs(list: Array<{ ownedByPet: boolean; visible: 
 /** Reading time starts after text reveal and grows with reply length, up to two minutes. */
 export function chatBubbleDuration(text: string, configuredMs: number) {
   return Math.min(120000, Math.max(30000, configuredMs, 25000 + 140 * Array.from(text).length))
+}
+
+/** A reply bubble stays up while its own audio plays, even if its read timer already fired. */
+export function bubbleWaitsForSpeech({ speechPending, isSpeakingBubble, isActive }: { speechPending: boolean; isSpeakingBubble: boolean; isActive: boolean }) {
+  return speechPending && isSpeakingBubble && isActive
 }
 
 /**

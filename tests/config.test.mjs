@@ -16,7 +16,8 @@ test('NAMESPACE 与 DEFAULTS 完整性', () => {
   assert.equal(DEFAULTS.voice.sttModel, 'gpt-transcribe')
   assert.equal(typeof DEFAULTS.voice.instructions, 'string')
   assert.equal(DEFAULTS.voice.conversation, false)
-  assert.equal(DEFAULTS.voice.autoSpeakChat, true)
+  assert.equal(DEFAULTS.voice.autoSpeakChat, false, '自动朗读默认关（opt-in）')
+  assert.equal(DEFAULTS.voice.minSpeakChars, 200)
   // Session context and news are enabled by default.
   assert.equal(DEFAULTS.chat.sessionContext, true)
   assert.equal(DEFAULTS.news.enabled, true)
@@ -37,6 +38,8 @@ test('buildSchema：条目 Config 用，解析出 volatile 实时引用', () => 
   assert.deepEqual(result.value.replies.feed.get(), DEFAULTS.replies.feed)
   assert.equal(result.value.voice.sttModel.get(), 'gpt-transcribe')
   assert.equal(result.value.voice.conversation.get(), false)
+  assert.equal(result.value.voice.autoSpeakChat.get(), false)
+  assert.equal(result.value.voice.minSpeakChars.get(), 200)
   assert.equal(result.value.chat.sessionContext.get(), true)
   assert.equal(result.value.news.maxItems.get(), 5)
   assert.deepEqual(result.value.news.feeds.get(), DEFAULTS.news.feeds)

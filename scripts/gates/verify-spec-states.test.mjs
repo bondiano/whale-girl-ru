@@ -5,15 +5,16 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { check } from './verify-spec-states.mjs'
-import { STATE_NAMES, STATE_TABLE } from '../../dist/client/logic.js'
+import { STATE_NAMES } from '../../dist/client/logic.js'
+import { ANIMATION_PRIORITY } from '../../dist/client/animation-machine.js'
 
 const names = [...STATE_NAMES]
 // Playback fixture follows the manifest, simplified to loop except idle blink and walk pingpong.
 const PLAYBACK = Object.fromEntries(names.map((s) => [s, s === 'idle' ? 'blink' : s === 'walk' ? 'pingpong' : s === 'wake' || s === 'error' ? 'once' : 'loop']))
-// Priority fixture uses the state-machine document format and STATE_TABLE row order.
+// Priority fixture uses the state-machine document format and machine guard order.
 function goodPriority() {
-  const rows = STATE_TABLE.map((r, i) => `${i + 1}. \`${r.state}\``)
-  return ['## 优先级（STATE_TABLE 行序，文法单源）', '', ...rows, '', '## 状态转换语义', ''].join('\n')
+  const rows = ANIMATION_PRIORITY.map((state, i) => `${i + 1}. \`${state}\``)
+  return ['## 优先级（ANIMATION_PRIORITY 守卫序）', '', ...rows, '', '## 状态转换语义', ''].join('\n')
 }
 
 /** Build a complete state table followed by an h3 table, proving the parser stops at its boundary. */
@@ -120,28 +121,28 @@ test('拒绝：缺少权威总表标题', () => {
   assert.match(errors.join('\n'), /缺少「状态总表（权威，N 状态）」标题/)
 })
 
-test('接受：优先级列表行序与 STATE_TABLE 一致', () => {
+test('接受：优先级列表行序与 ANIMATION_PRIORITY 一致', () => {
   const { ok, errors } = check(makeTree(goodSpec(), null, goodPriority()))
   assert.equal(ok, true, errors.join('\n'))
 })
 
 test('accepts a fully Russian priority heading while still checking the exact state order', () => {
-  const document = goodPriority().replace('## 优先级（STATE_TABLE 行序，文法单源）', '## Приоритеты (порядок строк STATE_TABLE)')
+  const document = goodPriority().replace('## 优先级（ANIMATION_PRIORITY 守卫序）', '## Приоритеты (порядок guards checking)')
   assert.equal(check(makeTree(goodSpec(), null, document)).ok, true)
 })
 
-test('拒绝：优先级列表行序 ≠ STATE_TABLE（文档与文法单源漂移）', () => {
+test('拒绝：优先级列表行序 ≠ ANIMATION_PRIORITY（文档与守卫序漂移）', () => {
   // Move idle first to produce a documented priority mismatch.
-  const tableOrder = STATE_TABLE.map((r) => r.state)
-  const reordered = ['idle', ...tableOrder.filter((s) => s !== 'idle')]
-  const bad = ['## 优先级（STATE_TABLE 行序，文法单源）', '', ...reordered.map((s, i) => `${i + 1}. \`${s}\``), ''].join('\n')
+  const machineOrder = [...ANIMATION_PRIORITY]
+  const reordered = ['idle', ...machineOrder.filter((s) => s !== 'idle')]
+  const bad = ['## 优先级（ANIMATION_PRIORITY 守卫序）', '', ...reordered.map((s, i) => `${i + 1}. \`${s}\``), ''].join('\n')
   const { ok, errors } = check(makeTree(goodSpec(), null, bad))
   assert.equal(ok, false)
-  assert.match(errors.join('\n'), /优先级列表行序.*≠.*STATE_TABLE 行序/)
+  assert.match(errors.join('\n'), /优先级列表行序.*≠.*ANIMATION_PRIORITY/)
 })
 
 test('拒绝：缺优先级逐行列表（state-machine 无 N. 行）', () => {
-  const { ok, errors } = check(makeTree(goodSpec(), null, '## 优先级\n\ndrag > idle > burst\n'))
+  const { ok, errors } = check(makeTree(goodSpec(), null, '## 优先级\n\ndrag > idle > welcome\n'))
   assert.equal(ok, false)
   assert.match(errors.join('\n'), /缺少「## 优先级」逐行列表/)
 })
