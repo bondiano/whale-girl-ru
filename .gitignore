@@ -8,5 +8,3 @@ pnpm-workspace.yaml
 # Local Rive prototype assets (about 3.2 GB); never commit.
 art/
 
-# TypeScript output is built by prepare/prepack and platform installers.
-dist/
