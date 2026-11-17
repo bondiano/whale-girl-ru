@@ -39,7 +39,7 @@
   "scripts": {
     "gates": "node scripts/gates/run.mjs",
     "gates:ci": "node scripts/gates/run.mjs --group ci",
-    "test": "npm run build && node --test 'tests/*.test.mjs'",
+    "test": "npm run build && node --test 'tests/*.test.ts'",
     "build:client": "node scripts/build-client.mjs",
     "check:client": "node scripts/build-client.mjs --check",
     "build": "node scripts/build.mjs",
