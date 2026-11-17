@@ -52,6 +52,10 @@ cd desktop && npm run start:desktop        # electron .; install with npm i -D e
 
 ### Headless 模式（核心自测 / 无桌面环境）
 
+源码在 `src/**/*.mts` 与 `render/src/*.ts`，`npm run build` 用 esbuild 把它们转成
+`lib/**/*.mjs` 与 `render/*.js`（Electron main、Tauri shell 和 `render/index.html`
+加载的就是这些生成物，路径不变）。下面的命令会自动先构建。
+
 ```sh
 npm run start:headless     # node lib/index.mjs --headless
 ```

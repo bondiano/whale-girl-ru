@@ -1,188 +1,152 @@
-// Desktop companion engine combines presence heartbeats, state polling, SSE,
-// and local scheduling. It emits animation intents and snapshots for headless or desktop rendering.
-// Only presence and interact are writable endpoints. The plugin exclusively owns
-// XP/titles and the ledger; this engine never rewrites them.
-
-import { createClient } from './http.mjs'
-import { createSSEClient } from './events.mjs'
-import { createLogger } from './utils.mjs'
-import { ROUTE_PREFIX } from './utils.mjs'
-import { createScheduler, stepScheduler, applyInteraction } from './scheduler.mjs'
-import { pickAnimation } from './state.mjs'
-
-/** Local scheduling ticks faster than polling to advance sleep, wandering, and working interludes. */
-const TICK_MS = 250
-
-/**
- * Start the desktop companion engine.
- * @param {object} opts Connection/runtime options from loadConfig().
- * @param {object} [hooks] Rendering or logging callbacks.
- * @param {(snapshot: object) => void} [hooks.onSnapshot] Called after a state refresh.
- * @param {(anim: {name: string, context: object}) => void} [hooks.onAnimation] Called when animation intent changes.
- * @param {(reply: string) => void} [hooks.onReply] Interaction bubble callback.
- * @returns {{ client, stop: () => Promise<void>, interact: (action:'feed'|'play') => Promise<void>, getState: () => object }}
- */
-export async function createCompanion(opts, hooks = {}) {
-  const log = opts.logger ?? createLogger()
+import { createClient } from "./http.mjs";
+import { createSSEClient } from "./events.mjs";
+import { createLogger } from "./utils.mjs";
+import { ROUTE_PREFIX } from "./utils.mjs";
+import { createScheduler, stepScheduler, applyInteraction } from "./scheduler.mjs";
+import { pickAnimation } from "./state.mjs";
+const TICK_MS = 250;
+async function createCompanion(opts, hooks = {}) {
+  const log = opts.logger ?? createLogger();
   const client = createClient({
     baseURL: opts.baseURL,
-    routePrefix: opts.routePrefix ?? ROUTE_PREFIX,
-  })
-
-  // Runtime state.
-  let snapshot = null            // Latest state response.
-  let remoteConfig = null        // Current server configuration.
-  let anim = { name: 'idle', context: {} } // Most recently derived animation intent.
-  let stopped = false
-  const sched = createScheduler({ sleepAfterMs: opts.sleepAfterMs })
-
-  // Fetch and reapply server configuration only when configRevision changes.
-  // Renderer size/opacity following is a separate desktop capability documented in DESIGN.
-  let lastConfigRevision = -1
+    routePrefix: opts.routePrefix ?? ROUTE_PREFIX
+  });
+  let snapshot = null;
+  let remoteConfig = null;
+  let anim = { name: "idle", context: {} };
+  let stopped = false;
+  const sched = createScheduler({ sleepAfterMs: opts.sleepAfterMs });
+  let lastConfigRevision = -1;
   const applyRemoteConfig = async () => {
-    if (snapshot === null || typeof snapshot.configRevision !== 'number') return
-    if (snapshot.configRevision === lastConfigRevision) return
-    lastConfigRevision = snapshot.configRevision
+    if (snapshot === null || typeof snapshot.configRevision !== "number") return;
+    if (snapshot.configRevision === lastConfigRevision) return;
+    lastConfigRevision = snapshot.configRevision;
     try {
-      const body = await client.getConfig()
-      remoteConfig = body?.config ?? null
+      const body = await client.getConfig();
+      remoteConfig = body?.config ?? null;
     } catch (err) {
-      log.warn('拉取 /config 失败（保持上次）:', err.message)
+      log.warn("\u62C9\u53D6 /config \u5931\u8D25\uFF08\u4FDD\u6301\u4E0A\u6B21\uFF09:", err.message);
     }
-  }
-
-  // Derive animation intent and notify rendering only when it changes.
-  let lastAnimName = null
+  };
+  let lastAnimName = null;
   const computeAnimation = () => {
-    const next = pickAnimation(snapshot, sched)
-    anim = next
+    const next = pickAnimation(snapshot, sched);
+    anim = next;
     if (next.name !== lastAnimName) {
-      lastAnimName = next.name
-      hooks.onAnimation?.(next)
+      lastAnimName = next.name;
+      hooks.onAnimation?.(next);
     }
-    hooks.onTick?.(next, sched)
-    return next
-  }
-
-  // State polling coalesces refreshes from timers, SSE, and interactions.
-  // Keep one request in flight; a refresh arriving during it schedules one follow-up
-  // so concurrent responses cannot race and the latest state is not lost.
-  let refreshing = false
-  let pendingRefresh = false
+    hooks.onTick?.(next, sched);
+    return next;
+  };
+  let refreshing = false;
+  let pendingRefresh = false;
   const refreshState = async () => {
     if (refreshing) {
-      pendingRefresh = true // Coalesce an in-flight refresh and request one follow-up.
-      return null
+      pendingRefresh = true;
+      return null;
     }
-    refreshing = true
+    refreshing = true;
     try {
       do {
-        pendingRefresh = false
+        pendingRefresh = false;
         try {
-          const body = await client.getState()
-          snapshot = body
-          await applyRemoteConfig()
-          hooks.onSnapshot?.(snapshot)
-          computeAnimation()
-          if (!pendingRefresh) return body
+          const body = await client.getState();
+          snapshot = body;
+          await applyRemoteConfig();
+          hooks.onSnapshot?.(snapshot);
+          computeAnimation();
+          if (!pendingRefresh) return body;
         } catch (err) {
-          log.warn('GET /state 失败:', err.message)
-          // Run another refresh if requests accumulated while this one was in flight.
-          return null
+          log.warn("GET /state \u5931\u8D25:", err.message);
+          return null;
         }
-      } while (pendingRefresh)
-      return snapshot
+      } while (pendingRefresh);
+      return snapshot;
     } finally {
-      refreshing = false
-      pendingRefresh = false
+      refreshing = false;
+      pendingRefresh = false;
     }
-  }
-
-  // SSE events refresh state immediately, reducing latency to one round trip.
-  let sse = null
+  };
+  let sse = null;
   const startSSE = () => {
-    if (opts.eventsEnabled === false) return
-    const url = new URL(`${opts.routePrefix ?? ROUTE_PREFIX}/events`, opts.baseURL).toString()
-    sse = createSSEClient(url, { signal: opts.signal })
-    sse.events.on('event', () => {
-      log.debug('SSE 事件 → 立即刷新 /state')
-      refreshState()
-    })
-    sse.events.on('reconnect', () => log.debug('SSE 重连'))
-    sse.events.on('error', (err) => log.warn('SSE:', err.message))
-  }
-
-  // Presence heartbeats run every 15 seconds; shutdown sends online:false.
-  // Bound requests with AbortSignal so an unreachable host cannot stall exit.
-  const PRESENCE_TIMEOUT_MS = 2000
+    if (opts.eventsEnabled === false) return;
+    const url = new URL(`${opts.routePrefix ?? ROUTE_PREFIX}/events`, opts.baseURL).toString();
+    sse = createSSEClient(url, { signal: opts.signal });
+    sse.events.on("event", () => {
+      log.debug("SSE \u4E8B\u4EF6 \u2192 \u7ACB\u5373\u5237\u65B0 /state");
+      refreshState();
+    });
+    sse.events.on("reconnect", () => log.debug("SSE \u91CD\u8FDE"));
+    sse.events.on("error", (err) => log.warn("SSE:", err.message));
+  };
+  const PRESENCE_TIMEOUT_MS = 2e3;
   const sendPresence = async (online) => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), PRESENCE_TIMEOUT_MS)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PRESENCE_TIMEOUT_MS);
     try {
-      const body = await client.setPresence(online, { signal: controller.signal })
-      return body
+      const body = await client.setPresence(online, { signal: controller.signal });
+      return body;
     } catch (err) {
-      log.warn(`POST /presence ${online ? '上线' : '下线'} 失败:`, err.message)
-      return null
+      log.warn(`POST /presence ${online ? "\u4E0A\u7EBF" : "\u4E0B\u7EBF"} \u5931\u8D25:`, err.message);
+      return null;
     } finally {
-      clearTimeout(timer)
+      clearTimeout(timer);
     }
-  }
-  let heartbeatTimer = null
+  };
+  let heartbeatTimer = null;
   const startHeartbeat = () => {
-    if (opts.autoPresence === false) return
-    heartbeatTimer = setInterval(() => sendPresence(true), opts.heartbeatMs)
-  }
-
-  // Start the engine.
-  if (opts.autoPresence !== false) await sendPresence(true) // Announce presence immediately so the web pet can hide.
-  startHeartbeat()
-  await refreshState()
-  startSSE()
-  const pollTimer = setInterval(refreshState, opts.pollMs)
+    if (opts.autoPresence === false) return;
+    heartbeatTimer = setInterval(() => sendPresence(true), opts.heartbeatMs);
+  };
+  if (opts.autoPresence !== false) await sendPresence(true);
+  startHeartbeat();
+  await refreshState();
+  startSSE();
+  const pollTimer = setInterval(refreshState, opts.pollMs);
   const tickTimer = setInterval(() => {
-    if (stopped) return
-    stepScheduler(sched, { snapshot, now: Date.now() })
-    computeAnimation()
-  }, TICK_MS)
-
-  // User interactions.
-  const interact = async (action = 'feed') => {
+    if (stopped) return;
+    stepScheduler(sched, { snapshot, now: Date.now() });
+    computeAnimation();
+  }, TICK_MS);
+  const interact = async (action = "feed") => {
     try {
-      const body = await client.interact(action)
-      applyInteraction(sched, action, Date.now()) // Apply local transient, joy, and wake effects using the injected clock.
-      const reply = body?.reply ?? null
-      log.info(`互动 ${action}: ${reply ?? ''}`)
-      hooks.onReply?.(reply)
-      await refreshState()
-      computeAnimation()
-      return body
+      const body = await client.interact(action);
+      applyInteraction(sched, action, Date.now());
+      const reply = body?.reply ?? null;
+      log.info(`\u4E92\u52A8 ${action}: ${reply ?? ""}`);
+      hooks.onReply?.(reply);
+      await refreshState();
+      computeAnimation();
+      return body;
     } catch (err) {
-      log.warn(`POST /interact ${action} 失败:`, err.message)
-      return null
+      log.warn(`POST /interact ${action} \u5931\u8D25:`, err.message);
+      return null;
     }
-  }
-
-  // Shutdown cleanup.
+  };
   const stop = async () => {
-    if (stopped) return
-    stopped = true
-    clearInterval(heartbeatTimer)
-    clearInterval(pollTimer)
-    clearInterval(tickTimer)
-    if (sse) sse.close()
+    if (stopped) return;
+    stopped = true;
+    clearInterval(heartbeatTimer);
+    clearInterval(pollTimer);
+    clearInterval(tickTimer);
+    if (sse) sse.close();
     if (opts.cleanupOnExit !== false) {
-      await sendPresence(false) // Explicitly go offline so the web pet reappears immediately.
+      await sendPresence(false);
     }
-    log.info('伴侣已停止（presence 已下线）')
-  }
-
+    log.info("\u4F34\u4FA3\u5DF2\u505C\u6B62\uFF08presence \u5DF2\u4E0B\u7EBF\uFF09");
+  };
   return {
     client,
     interact,
     getState: () => snapshot,
     getAnimation: () => anim,
-    get scheduler() { return sched },
-    stop,
-  }
+    get scheduler() {
+      return sched;
+    },
+    stop
+  };
 }
+export {
+  createCompanion
+};

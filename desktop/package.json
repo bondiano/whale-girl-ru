@@ -17,12 +17,13 @@
     "README.zh.md"
   ],
   "scripts": {
-    "start": "node lib/index.mjs",
-    "start:headless": "node lib/index.mjs --headless",
-    "start:tauri": "cd src-tauri && cargo run",
-    "build:tauri": "cd src-tauri && cargo build --release",
-    "start:electron": "electron .",
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "build": "node scripts/build.ts",
+    "start": "npm run build && node lib/index.mjs",
+    "start:headless": "npm run build && node lib/index.mjs --headless",
+    "start:tauri": "npm run build && cd src-tauri && cargo run",
+    "build:tauri": "npm run build && cd src-tauri && cargo build --release",
+    "start:electron": "npm run build && electron .",
+    "test": "npm run build && node --test \"test/**/*.test.ts\"",
     "prepublishOnly": "npm test"
   },
   "engines": {
