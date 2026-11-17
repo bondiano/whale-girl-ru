@@ -46,5 +46,16 @@ await build({
   logLevel: 'warning',
 })
 
+await build({
+  entryPoints: [join(renderDir, 'src', 'preload.cts')],
+  outdir: renderDir,
+  outExtension: { '.js': '.cjs' },
+  format: 'cjs',
+  platform: 'node',
+  target: 'node22',
+  bundle: false,
+  logLevel: 'warning',
+})
+
 for (const entry of entryPoints) process.stdout.write(`emitted lib/${relative(srcDir, entry).replace(/\.mts$/, '.mjs')}\n`)
-for (const name of renderScripts) process.stdout.write(`emitted render/${name}.js\n`)
+for (const name of [...renderScripts, "preload"]) process.stdout.write(`emitted render/${name}.${name === "preload" ? "cjs" : "js"}\n`)

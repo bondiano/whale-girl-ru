@@ -1,14 +1,11 @@
-// Electron preload exposes only the minimal whaleGirl IPC API through contextBridge.
-// The renderer has no Node globals, preserving context isolation.
-const { contextBridge, ipcRenderer } = require('electron')
-
-contextBridge.exposeInMainWorld('whaleGirl', {
-  getManifest: () => ipcRenderer.invoke('wg:manifest'),
-  getSheet: (characterId, sheet) => ipcRenderer.invoke('wg:sheet', { characterId, sheet }),
-  interact: (action) => ipcRenderer.send('wg:interact', action),
-  setHitarea: (rect) => ipcRenderer.send('wg:set-hitarea', rect),
-  dragWindow: (dx, dy) => ipcRenderer.send('wg:drag-window', { dx, dy }),
-  onAnim: (cb) => ipcRenderer.on('wg:anim', (_e, anim) => cb(anim)),
-  onSnapshot: (cb) => ipcRenderer.on('wg:snapshot', (_e, snap) => cb(snap)),
-  onReply: (cb) => ipcRenderer.on('wg:reply', (_e, reply) => cb(reply)),
-})
+const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("whaleGirl", {
+  getManifest: () => ipcRenderer.invoke("wg:manifest"),
+  getSheet: (characterId, sheet) => ipcRenderer.invoke("wg:sheet", { characterId, sheet }),
+  interact: (action) => ipcRenderer.send("wg:interact", action),
+  setHitarea: (rect) => ipcRenderer.send("wg:set-hitarea", rect),
+  dragWindow: (dx, dy) => ipcRenderer.send("wg:drag-window", { dx, dy }),
+  onAnim: (cb) => ipcRenderer.on("wg:anim", (_e, anim) => cb(anim)),
+  onSnapshot: (cb) => ipcRenderer.on("wg:snapshot", (_e, snap) => cb(snap)),
+  onReply: (cb) => ipcRenderer.on("wg:reply", (_e, reply) => cb(reply))
+});
