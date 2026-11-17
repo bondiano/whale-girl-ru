@@ -87,8 +87,8 @@ registry 安装记的是版本范围（pnpm 默认存 `^` 前缀），本来就�
 
 | 面 | 跑什么 |
 |---|---|
-| 状态机、`.git` 布局解析、各失败分支（worktree / packed-refs / 游离 HEAD / 限流 / 第二步失败） | `node --test tests/update-host.test.mjs`（真实临时目录 + 注入的假依赖） |
-| 纯逻辑（spec 归一、锁文件读值、版本比较、三态判断） | `node --test tests/update.test.mjs` |
-| 呈现状态机与文案接线 | `node --test tests/update-state.test.mjs` |
-| HTTP 层与端到端接线（跨源、方法/缓存头、载荷形状、两步重装、启停保留） | `node --test tests/update-route.test.mjs` |
-| 真点一下（按钮接线错位只有真点才暴露） | `node scripts/verify-client-behavior.mjs <web-url> update-row`（需要部署里确实有新版可更新） |
+| 状态机、`.git` 布局解析、各失败分支（worktree / packed-refs / 游离 HEAD / 限流 / 第二步失败） | `node --test tests/update-host.test.ts`（真实临时目录 + 注入的假依赖） |
+| 纯逻辑（spec 归一、锁文件读值、版本比较、三态判断） | `node --test tests/update.test.ts` |
+| 呈现状态机与文案接线 | `node --test tests/update-state.test.ts` |
+| HTTP 层与端到端接线（跨源、方法/缓存头、载荷形状、两步重装、启停保留） | `node --test tests/update-route.test.ts` |
+| 真点一下（按钮接线错位只有真点才暴露） | `node scripts/verify-client-behavior.ts <web-url> update-row`（需要部署里确实有新版可更新） |

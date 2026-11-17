@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-spec-states.mjs'
+import { check } from './verify-spec-states.ts'
 import { STATE_NAMES } from '../../dist/client/logic.js'
 import { ANIMATION_PRIORITY } from '../../dist/client/animation-machine.js'
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-prose.mjs'
+import { check } from './verify-prose.ts'
 
 function makeTree(files) {
   const root = mkdtempSync(join(tmpdir(), 'vprose-'))

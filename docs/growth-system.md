@@ -26,7 +26,7 @@
 ### 等级曲线
 
 - `xpForLevel(L) = 50·L·(L−1)/2`（L2=50、L3=150、L4=300…），反函数闭式解 O(1)。
-- XP 上限封顶（XP_CAP=1e12）与浮点取整在持久化归一化（[persistence.mjs](../src/core/persistence.ts)）。
+- XP 上限封顶（XP_CAP=1e12）与浮点取整在持久化归一化（[persistence.ts](../src/core/persistence.ts)）。
 
 ### 账本结构
 

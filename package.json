@@ -37,12 +37,12 @@
     "xstate": "^5.33.4"
   },
   "scripts": {
-    "gates": "node scripts/gates/run.mjs",
-    "gates:ci": "node scripts/gates/run.mjs --group ci",
+    "gates": "node scripts/gates/run.ts",
+    "gates:ci": "node scripts/gates/run.ts --group ci",
     "test": "npm run build && node --test 'tests/*.test.ts'",
-    "build:client": "node scripts/build-client.mjs",
-    "check:client": "node scripts/build-client.mjs --check",
-    "build": "node scripts/build.mjs",
+    "build:client": "node scripts/build-client.ts",
+    "check:client": "node scripts/build-client.ts --check",
+    "build": "node scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build"
   },

@@ -1,5 +1,5 @@
 // Browser behavior probes require Chrome and a running web host.
-// Usage: node scripts/verify-client-behavior.mjs <web-url> [scenario].
+// Usage: node scripts/verify-client-behavior.ts <web-url> [scenario].
 // Scenarios cover sleep/drag/wake, the real update-button request, memory-bubble
 // deduplication, and inline chat layout/freezing/Escape recovery.
 // Memory and chat probes inject deterministic responses, independent of real tasks or models.
@@ -18,7 +18,7 @@ const DEBUG_PORT = 9240
 const PROFILE_DIR = mkdtempSync(join(tmpdir(), 'whale-girl-behavior-'))
 
 if (!URL) {
-  console.error('用法: node scripts/verify-client-behavior.mjs <web-url> [scenario]')
+  console.error('用法: node scripts/verify-client-behavior.ts <web-url> [scenario]')
   process.exit(2)
 }
 

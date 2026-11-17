@@ -54,7 +54,7 @@ dsh plugin --profile web add whale-girl                        # npm package, in
 
 **ChatGPT 订阅不支持此音频接口**，见 [SIWC 限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)；`subscription` 在联网前拒绝。新闻按需读取 RSS/Atom。
 
-源码为 `src/` TypeScript，输出 `dist/` 和 `lib/client.js`。Node ≥24：`npm ci`、`npm test`、`npm run typecheck`、`node scripts/gates/run.mjs`。macOS 与 WSL 安装器均先构建；后端变更需在活跃会话结束后重启 DSH。
+源码为 `src/` TypeScript，输出 `dist/` 和 `lib/client.js`。Node ≥24：`npm ci`、`npm test`、`npm run typecheck`、`node scripts/gates/run.ts`。macOS 与 WSL 安装器均先构建；后端变更需在活跃会话结束后重启 DSH。
 
 ## 桌面伴侣（可选）
 

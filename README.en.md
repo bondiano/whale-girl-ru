@@ -61,7 +61,7 @@ The chat and microphone lifecycle is one xstate machine (`src/client/conversatio
 
 **Subscription audio is unavailable** under the [supported SIWC limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). Selecting `subscription` refuses audio before network or credential access. Microphone clips are capped at 30 seconds; conversation mode listens again after replies and stops with Escape, its toggle or chat close. While any text field has focus (including the host chat) or the pet composer holds a draft, the microphone stays off, so typing never becomes a random spoken message.
 
-Build with Node ≥24: `npm ci`, `npm test`, `npm run typecheck`, then `node scripts/gates/run.mjs`. TypeScript sources are in `src/`, compiled code in `dist/`, and the generated DSH browser wrapper in `lib/client.js`. macOS and WSL installers build the same plugin. Backend changes need a DSH restart after active sessions finish.
+Build with Node ≥24: `npm ci`, `npm test`, `npm run typecheck`, then `node scripts/gates/run.ts`. TypeScript sources are in `src/`, compiled code in `dist/`, and the generated DSH browser wrapper in `lib/client.js`. macOS and WSL installers build the same plugin. Backend changes need a DSH restart after active sessions finish.
 
 ## Desktop Companion (Optional)
 
@@ -150,7 +150,7 @@ The character is chosen from the manifest or the `whale-girl:character` localSto
 whale-girl is a complete **bundle plugin format** exemplar (`dsh.bundle` + `cordis.patch.yml` + `lib/`, evolving with the official mechanism) — model new plugins on it:
 
 - **Structure**: `lib/` (entry / logic / client / assets) separate from docs, decisions, scripts — root [AGENTS.md](AGENTS.md)
-- **Conventions**: gates (`scripts/gates/run.mjs`) + decision records + full asset contracts; guidance: plugin-registry's [make-dsh-plugin skill](https://github.com/vlln/plugin-registry/tree/main/skills/make-dsh-plugin), [cookbook](https://github.com/vlln/plugin-registry/blob/main/docs/cookbook/creating-a-plugin.md), [gotchas](https://github.com/vlln/plugin-registry/blob/main/skills/make-dsh-plugin/references/gotchas.md)
+- **Conventions**: gates (`scripts/gates/run.ts`) + decision records + full asset contracts; guidance: plugin-registry's [make-dsh-plugin skill](https://github.com/vlln/plugin-registry/tree/main/skills/make-dsh-plugin), [cookbook](https://github.com/vlln/plugin-registry/blob/main/docs/cookbook/creating-a-plugin.md), [gotchas](https://github.com/vlln/plugin-registry/blob/main/skills/make-dsh-plugin/references/gotchas.md)
 
 ## Contributing
 

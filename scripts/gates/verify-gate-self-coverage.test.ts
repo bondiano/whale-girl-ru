@@ -4,36 +4,36 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-gate-self-coverage.mjs'
+import { check } from './verify-gate-self-coverage.ts'
 
 function makeTree(runSrc, gateFiles) {
   const root = mkdtempSync(join(tmpdir(), 'vgsc-'))
   const dir = join(root, 'scripts', 'gates')
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'run.mjs'), runSrc)
+  writeFileSync(join(dir, 'run.ts'), runSrc)
   for (const f of gateFiles) writeFileSync(join(dir, f), '// fake')
   return root
 }
 
 const RUN_WITH_TESTS = `const GATES = [
-  { name: 'verify-a', group: 'local', args: ['scripts/gates/verify-a.mjs'] },
-  { name: 'verify-b', group: 'local', args: ['scripts/gates/verify-b.mjs'] },
-  { name: 'unit-tests', group: 'ci', args: ['--test', 'tests/*.test.mjs'] },
+  { name: 'verify-a', group: 'local', args: ['scripts/gates/verify-a.ts'] },
+  { name: 'verify-b', group: 'local', args: ['scripts/gates/verify-b.ts'] },
+  { name: 'unit-tests', group: 'ci', args: ['--test', 'tests/*.test.ts'] },
 ]`
 
 test('接受：GATES 全部有对应自证测试', () => {
-  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.mjs', 'verify-b.mjs', 'verify-a.test.mjs', 'verify-b.test.mjs']))
+  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.ts', 'verify-b.ts', 'verify-a.test.ts', 'verify-b.test.ts']))
   assert.equal(ok, true, errors.join('\n'))
 })
 
 test('拒绝：新增门禁缺自证测试（gate-self-tests glob 不会自然红）', () => {
-  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.mjs', 'verify-b.mjs', 'verify-a.test.mjs']))
+  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.ts', 'verify-b.ts', 'verify-a.test.ts']))
   assert.equal(ok, false)
   assert.match(errors.join('\n'), /门禁 verify-b 缺自证测试 scripts\/gates\/verify-b\.test\.mjs/)
 })
 
-test('接受：测试组本身（unit-tests/tool-tests/gate-self-tests）不要求 .test.mjs', () => {
-  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.mjs', 'verify-b.mjs', 'verify-a.test.mjs', 'verify-b.test.mjs']))
+test('接受：测试组本身（unit-tests/tool-tests/gate-self-tests）不要求 .test.ts', () => {
+  const { ok, errors } = check(makeTree(RUN_WITH_TESTS, ['verify-a.ts', 'verify-b.ts', 'verify-a.test.ts', 'verify-b.test.ts']))
   assert.equal(ok, true, errors.join('\n'))
 })
 

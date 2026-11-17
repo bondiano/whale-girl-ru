@@ -85,10 +85,10 @@ export function generate({ check = false, root = ROOT } = {}) {
   try {
     committed = readFileSync(outputPath)
   } catch {
-    return { ok: false, errors: [`${outputPath} 不存在：运行 node scripts/build-client.mjs 生成`] }
+    return { ok: false, errors: [`${outputPath} 不存在：运行 node scripts/build-client.ts 生成`] }
   }
   if (Buffer.compare(committed, code) !== 0) {
-    return { ok: false, errors: ['client.js 与生成器输出不一致：运行 node scripts/build-client.mjs 重新生成（手改生成物禁止）'] }
+    return { ok: false, errors: ['client.js 与生成器输出不一致：运行 node scripts/build-client.ts 重新生成（手改生成物禁止）'] }
   }
   return { ok: true }
 }

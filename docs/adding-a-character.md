@@ -9,7 +9,7 @@
 - **必读（仅 1 份文档 + 1 张参考图）**：[sprites-spec.md](sprites-spec.md)（§状态总表：15 状态的帧数/画面/播放行为/朝向；§素材管线：切图工具与参数；§角色契约：5 项硬性要求）+ `originals/鲸鱼娘.png`（画风参考）。本文件 §二动作槽位（manifest 字段）与 §四动手步骤（具体命令）。
 - **必不读**：`src/client/`、`src/index.ts`、`src/core/` 及一切触发/优先级/播放器/热区实现——行为文法全角色共通（见下 §心智模型），素材自动跟随，无需理解代码。
 - **本机前置**：`python3` + `Pillow` + `numpy`（切图工具 [slice-sheet.py](../scripts/slice-sheet.py) 的依赖）。
-- **验收**：`node scripts/gates/verify-assets.mjs`——门禁即契约的机器化，**通过即合格**，无需运行 DSH、无需看渲染效果（表现细节由素材决定）。
+- **验收**：`node scripts/gates/verify-assets.ts`——门禁即契约的机器化，**通过即合格**，无需运行 DSH、无需看渲染效果（表现细节由素材决定）。
 - **改图约束**：已发布角色的 sheet 改图**必须改文件名或角色 id**——素材路由按 `immutable` 缓存，同名替换会滞留旧图（manifest 例外：client 以 `no-store` 每次页面加载重新拉取，见 [bug-fix/2026-08-20-manifest-cache-no-store.md](../decisions/implemented/bug-fix/2026-08-20-manifest-cache-no-store.md)）。
 - **产出物**：`assets/characters/<id>/`（15 张 sheet）+ `assets/manifest.json` 条目；提交/共享这两样即可，不碰任何代码文件。
 
@@ -114,7 +114,7 @@
 2. **生图**：按 [sprites-spec.md](sprites-spec.md) 契约（纯绿 #00FF00、256 帧、帧序从左到右）逐状态生图
 3. **切图**（工具化，见 [sprites-spec.md](sprites-spec.md) 素材管线）：`python3 scripts/slice-sheet.py <图> <模式> --key R,G,B --out assets/characters/<角色id>/`——网格图用 `--sheet 3x3 --states <状态名> --frames <每行帧数>`，单状态/分栏用 `--single [--columns N --states a,b]`；`--swap-frames 0,2,1` 校正 AI 乱序帧；`--normalize-scale 0.88` 统一内容占比
 4. **投放**：sheet 进 `assets/characters/<id>/`；manifest 加 `characters.<id>`（含 meta + states）
-5. **验证**：`node scripts/gates/verify-assets.mjs`（文件存在/PNG 尺寸/帧序/motion/角色 id 合法性）；`node scripts/verify-client-smoke.mjs <web-url>` 浏览器冒烟
+5. **验证**：`node scripts/gates/verify-assets.ts`（文件存在/PNG 尺寸/帧序/motion/角色 id 合法性）；`node scripts/verify-client-smoke.ts <web-url>` 浏览器冒烟
 6. **切换**：设置 localStorage `whale-girl:character` = 角色 id，然后重新加载页面
 
 ## 五、验证门禁（角色必须通过）

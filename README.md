@@ -180,7 +180,7 @@ whale-girl:
 whale-girl — полный образец **формата bundle-плагина** (`dsh.bundle` + `cordis.patch.yml` + `lib/`, развивается вместе с официальным механизмом) — делайте новые плагины по его образцу:
 
 - **Структура**: `lib/` (entry / логика / client / assets) отдельно от docs, decisions, scripts — корневой [AGENTS.md](AGENTS.md)
-- **Соглашения**: гейты (`scripts/gates/run.mjs`) + записи о решениях + полные контракты ресурсов; руководство: [make-dsh-plugin skill](https://github.com/vlln/plugin-registry/tree/main/skills/make-dsh-plugin), [cookbook](https://github.com/vlln/plugin-registry/blob/main/docs/cookbook/creating-a-plugin.md), [gotchas](https://github.com/vlln/plugin-registry/blob/main/skills/make-dsh-plugin/references/gotchas.md)
+- **Соглашения**: гейты (`scripts/gates/run.ts`) + записи о решениях + полные контракты ресурсов; руководство: [make-dsh-plugin skill](https://github.com/vlln/plugin-registry/tree/main/skills/make-dsh-plugin), [cookbook](https://github.com/vlln/plugin-registry/blob/main/docs/cookbook/creating-a-plugin.md), [gotchas](https://github.com/vlln/plugin-registry/blob/main/skills/make-dsh-plugin/references/gotchas.md)
 
 ## Участие
 
@@ -207,7 +207,7 @@ MIT License
 npm ci
 npm test
 npm run typecheck
-node scripts/gates/run.mjs
+node scripts/gates/run.ts
 ```
 
 Установщики workstation собирают одинаковый плагин для macOS и WSL. Смена Node half требует перезапуска DSH; активные сессии перед этим нужно завершить. `desktop/` имеет самостоятельную сборку.

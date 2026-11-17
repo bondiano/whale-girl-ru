@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-assets.mjs'
+import { check } from './verify-assets.ts'
 import { STATE_NAMES } from '../../dist/client/logic.js'
 
 /** Create a complete manifest with one valid entry for each of the 15 states. */

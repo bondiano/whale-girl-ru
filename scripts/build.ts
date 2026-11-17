@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 for (const [command, args] of [
   [process.execPath, ['node_modules/typescript/bin/tsc']],
-  [process.execPath, ['scripts/build-client.mjs']],
+  [process.execPath, ['scripts/build-client.ts']],
 ]) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit' })
   if (result.error) throw result.error

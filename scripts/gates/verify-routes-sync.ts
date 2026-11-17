@@ -19,10 +19,10 @@ function readPrefix(routesSrc) {
 export function check(root = ROOT) {
   const errors = []
   const consumers = [
-    { file: 'src/client/index.ts', label: 'client/index.mjs' },
-    { file: 'src/client/settings-card.ts', label: 'client/settings-card.mjs' },
-    { file: 'src/index.ts', label: 'index.mjs' },
-    { file: 'src/core/assets.ts', label: 'src/assets.mjs' },
+    { file: 'src/client/index.ts', label: 'client/index.ts' },
+    { file: 'src/client/settings-card.ts', label: 'client/settings-card.ts' },
+    { file: 'src/index.ts', label: 'index.ts' },
+    { file: 'src/core/assets.ts', label: 'src/assets.ts' },
   ]
   const routesSrc = readFileSync(join(root, 'src', 'core', 'routes.ts'), 'utf8')
   const prefix = readPrefix(routesSrc)

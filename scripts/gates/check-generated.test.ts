@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { generate, esbuildAvailable } from '../build-client.mjs'
+import { generate, esbuildAvailable } from '../build-client.ts'
 
 const ENTRY = `export function apply() {}\n`
 

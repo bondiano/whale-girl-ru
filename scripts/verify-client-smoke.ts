@@ -1,4 +1,4 @@
-// Browser smoke test: node scripts/verify-client-smoke.mjs <web-url>.
+// Browser smoke test: node scripts/verify-client-smoke.ts <web-url>.
 // Requires a running web host and Chrome; CHROME_BIN overrides its location.
 // Assert client apply succeeds, the pet host exists, and a ready sprite is visible.
 // This manual browser check covers client behavior unavailable to HTTP-only probes.
@@ -16,7 +16,7 @@ const PROFILE_DIR = mkdtempSync(join(tmpdir(), 'whale-girl-smoke-'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 if (!URL) {
-  console.error('用法: node scripts/verify-client-smoke.mjs <web-url>')
+  console.error('用法: node scripts/verify-client-smoke.ts <web-url>')
   process.exit(2)
 }
 if (!existsSync(CHROME)) {

@@ -28,5 +28,5 @@
 ## 验证
 
 ```sh
-node scripts/gates/run.mjs   # Local gates for links and decision-record format
+node scripts/gates/run.ts   # Local gates for links and decision-record format
 ```

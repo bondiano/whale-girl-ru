@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-client-seams.mjs'
+import { check } from './verify-client-seams.ts'
 
 const OK_SOURCE = "export const inject = ['slots', 'locale', 'configForms']"
 const OK_BUNDLE = 'window.__ModuleLoader__.load({ id: "whale-girl", factory: () => {} });'

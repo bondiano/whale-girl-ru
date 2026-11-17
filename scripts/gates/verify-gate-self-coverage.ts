@@ -1,4 +1,4 @@
-// Require a corresponding regression test for every implemented gate in run.mjs.
+// Require a corresponding regression test for every implemented gate in run.ts.
 // A test glob alone cannot detect a missing test file. Test-group entries are exempt.
 // This check is read-only and deterministic.
 import { readFileSync, readdirSync } from 'node:fs'
@@ -9,7 +9,7 @@ const ROOT = resolve(import.meta.dirname, '../..')
 // These registry entries are test groups, without a gate implementation or matching self-test.
 const TEST_GROUPS = new Set(['unit-tests', 'tool-tests', 'gate-self-tests'])
 
-/** Extract gate names from run.mjs without importing or executing it. */
+/** Extract gate names from run.ts without importing or executing it. */
 export function parseGateNames(runSrc) {
   return [...runSrc.matchAll(/name:\s*'([a-z-]+)'/g)].map((m) => m[1])
 }
@@ -18,16 +18,16 @@ export function parseGateNames(runSrc) {
 export function check(root = ROOT) {
   const errors = []
   const gatesDir = join(root, 'scripts', 'gates')
-  const runSrc = readFileSync(join(gatesDir, 'run.mjs'), 'utf8')
+  const runSrc = readFileSync(join(gatesDir, 'run.ts'), 'utf8')
   const names = parseGateNames(runSrc)
   if (names.length === 0) {
-    return { ok: false, errors: ['scripts/gates/run.mjs 未解析到 GATES 条目（GATES 格式变更？）'] }
+    return { ok: false, errors: ['scripts/gates/run.ts 未解析到 GATES 条目（GATES 格式变更？）'] }
   }
-  const present = new Set(readdirSync(gatesDir).filter((f) => f.endsWith('.test.mjs')))
+  const present = new Set(readdirSync(gatesDir).filter((f) => f.endsWith('.test.ts')))
   for (const name of names) {
     if (TEST_GROUPS.has(name)) continue
-    if (!present.has(`${name}.test.mjs`)) {
-      errors.push(`门禁 ${name} 缺自证测试 scripts/gates/${name}.test.mjs（法则 2：每个非平凡门禁必须有证明它会拒绝的测试）`)
+    if (!present.has(`${name}.test.ts`)) {
+      errors.push(`门禁 ${name} 缺自证测试 scripts/gates/${name}.test.ts（法则 2：每个非平凡门禁必须有证明它会拒绝的测试）`)
     }
   }
   return { ok: errors.length === 0, errors }

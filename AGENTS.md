@@ -29,11 +29,11 @@ decisions/       Decision records; see decisions/README.md
 ```sh
 npm ci && npm run build                # install locked tooling and compile
 npm run typecheck                      # strict TypeScript
-node scripts/gates/run.mjs              # Selected local gates
-node scripts/gates/run.mjs --group ci   # Full CI gates, including unit tests
-node --test 'tests/*.test.mjs'          # Node plugin unit tests
-node scripts/build-client.mjs           # Generate lib/client.js
-node scripts/build-client.mjs --check   # Check lib/client.js freshness without writing
+node scripts/gates/run.ts              # Selected local gates
+node scripts/gates/run.ts --group ci   # Full CI gates, including unit tests
+node --test 'tests/*.test.ts'          # Node plugin unit tests
+node scripts/build-client.ts           # Generate lib/client.js
+node scripts/build-client.ts --check   # Check lib/client.js freshness without writing
 ```
 
 ### 按改动面选检查
@@ -42,18 +42,18 @@ node scripts/build-client.mjs --check   # Check lib/client.js freshness without 
 
 | 改动触达 | 跑什么 |
 |---------|--------|
-| src/core/ 状态机行为 | `node --test 'tests/pet-state.test.mjs'` |
-| src/client/ 源码或构建配置 | `node scripts/build-client.mjs --check`，改完跑 `node scripts/build-client.mjs`；验证站 web 运行中跑 `node scripts/verify-client-smoke.mjs <web-url>`（浏览器冒烟：apply 成功 + 宠物渲染，curl 覆盖不到的 client 面）；**client 行为改动**（拖拽/交互/状态序列）加跑 `node scripts/verify-client-behavior.mjs <web-url> [scenario]`（行为回归探针，见 [decisions/implemented/testing/2026-08-10-client-behavior-probe.md](decisions/implemented/testing/2026-08-10-client-behavior-probe.md)） |
-| 文档、决策记录 | `node scripts/gates/run.mjs` |
-| lib/assets/ sheet 或 manifest | `node scripts/gates/verify-assets.mjs` + 重装 + **刷新页面即可，无需重启 web**（assets 路由按请求读磁盘） |
-| src/index.ts / src/core/（Node half） | `node scripts/gates/run.mjs` + 重装 + **web 重启**（ESM 缓存：同 URL 二次 import 返回旧模块，已挂载过的插件改源码 disable/enable 不生效；仅进程内从未 import 过的插件可首次面板 enable 免重启，见 [decisions/implemented/bug-fix/2026-08-08-tool-schema-dsl-compat.md](decisions/implemented/bug-fix/2026-08-08-tool-schema-dsl-compat.md)）；重启后日志须无 `plugin tree failed to load` |
-| 门禁本身 | 对应门禁的自证测试（`node --test 'scripts/gates/*.test.mjs'`） |
+| src/core/ 状态机行为 | `node --test 'tests/pet-state.test.ts'` |
+| src/client/ 源码或构建配置 | `node scripts/build-client.ts --check`，改完跑 `node scripts/build-client.ts`；验证站 web 运行中跑 `node scripts/verify-client-smoke.ts <web-url>`（浏览器冒烟：apply 成功 + 宠物渲染，curl 覆盖不到的 client 面）；**client 行为改动**（拖拽/交互/状态序列）加跑 `node scripts/verify-client-behavior.ts <web-url> [scenario]`（行为回归探针，见 [decisions/implemented/testing/2026-08-10-client-behavior-probe.md](decisions/implemented/testing/2026-08-10-client-behavior-probe.md)） |
+| 文档、决策记录 | `node scripts/gates/run.ts` |
+| lib/assets/ sheet 或 manifest | `node scripts/gates/verify-assets.ts` + 重装 + **刷新页面即可，无需重启 web**（assets 路由按请求读磁盘） |
+| src/index.ts / src/core/（Node half） | `node scripts/gates/run.ts` + 重装 + **web 重启**（ESM 缓存：同 URL 二次 import 返回旧模块，已挂载过的插件改源码 disable/enable 不生效；仅进程内从未 import 过的插件可首次面板 enable 免重启，见 [decisions/implemented/bug-fix/2026-08-08-tool-schema-dsl-compat.md](decisions/implemented/bug-fix/2026-08-08-tool-schema-dsl-compat.md)）；重启后日志须无 `plugin tree failed to load` |
+| 门禁本身 | 对应门禁的自证测试（`node --test 'scripts/gates/*.test.ts'`） |
 
 ## 约定
 
 - **每个非平凡改动必须在同一 PR 内新增或更新至少一条决策记录**；豁免与格式见 [decisions/README.md](decisions/README.md)。
-- **约定必须有门禁。** 机械可查的约定写成只拒绝一条不变量的程序；每个门禁有用非法样例证明它会拒绝的测试。门禁清单的权威是 [scripts/gates/run.mjs](scripts/gates/run.mjs)，本文件不手抄。
-- **生成物一律不手改**：`lib/client.js` 由 [scripts/build-client.mjs](scripts/build-client.mjs) 生成，改 [src/client/index.ts](src/client/index.ts)；新鲜度由 `--check` 守护。
+- **约定必须有门禁。** 机械可查的约定写成只拒绝一条不变量的程序；每个门禁有用非法样例证明它会拒绝的测试。门禁清单的权威是 [scripts/gates/run.ts](scripts/gates/run.ts)，本文件不手抄。
+- **生成物一律不手改**：`lib/client.js` 由 [scripts/build-client.ts](scripts/build-client.ts) 生成，改 [src/client/index.ts](src/client/index.ts)；新鲜度由 `--check` 守护。
 - **官方插件契约**：仓库根 `package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`（insert 挂载自身）+ `dsh.client`（platform web）；Node half source `src/index.ts`, runtime `dist/index.js`（`name`/`inject`/`Config`/`apply`）——`Config` schema 即设置命名空间（条目 id），live 字段标 `.volatile()`；client 经 `__ModuleLoader__.load` 注册（`src/client/index.ts` 命名导出 `name`/`inject`/`apply`）。
 - **注释与文档写契约，不写推理转录**：行为、时序、异常、后果、所有权、安全使用条件保留；实现叙述、测试走查、评审史、代码复述删除。只写当前态。
 - **一个 PR 一种性质** + 对应标签（feature / bug-fix / doc / testing / cleanup）；独立改动拆开；缺陷在引入它的那个 PR 上修，不往下游打补丁。**PR 性质标签与决策分类是两套词汇**：决策分类是封闭集合（feature/bug-fix/simplification/architecture/process/testing，见 [decisions/README.md](decisions/README.md)）——cleanup 改动进 `simplification/` 目录，doc 改动通常无决策记录（纯文档豁免）。

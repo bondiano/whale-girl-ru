@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check } from './verify-routes-sync.mjs'
+import { check } from './verify-routes-sync.ts'
 
 const ROUTES_SRC = `export const ROUTE_PREFIX = '/whale-girl'
 export const STATE_PATH = \`\${ROUTE_PREFIX}/state\`

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { check, BUDGETS } from './verify-doc-budget.mjs'
+import { check, BUDGETS } from './verify-doc-budget.ts'
 
 function makeTree(files) {
   const root = mkdtempSync(join(tmpdir(), 'vbudget-'))
